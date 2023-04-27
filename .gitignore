@@ -1,0 +1,6 @@
+
+*.log
+
+\@17thAttendanceTracker/config.json
+
+*.bak

@@ -1,0 +1,1 @@
+(parseSimpleArray ("AttendanceTracker" callExtension "getTimestamp")) select 0;
