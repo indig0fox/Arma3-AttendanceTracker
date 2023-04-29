@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -74,6 +75,19 @@ func getDir() string {
 func loadConfig() {
 	// load config from file as JSON
 	functionName := "loadConfig"
+
+	// get location of this dll
+	dllPath, err := filepath.Abs(os.Args[0])
+	if err != nil {
+		writeLog(functionName, fmt.Sprintf(`["Error getting DLL path: %v", "ERROR"]`, err))
+		return
+	}
+
+	// set the addon directory to the parent directory of the dll
+	ADDON_FOLDER = filepath.Dir(dllPath)
+	LOG_FILE = ADDON_FOLDER + "\\attendanceTracker.log"
+	CONFIG_FILE = ADDON_FOLDER + "\\config.json"
+
 	file, err := os.Open(CONFIG_FILE)
 	if err != nil {
 		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
@@ -243,9 +257,11 @@ func goRVExtensionArgs(output *C.char, outputsize C.size_t, input *C.char, argv 
 	temp := fmt.Sprintf("Function: %s nb params: %d", C.GoString(input), argc)
 
 	switch C.GoString(input) {
-	case "logAttendance": // callExtension ["serverEvent", [_hash] call CBA_fnc_encodeJSON];
-		if argc == 1 {
-			go writeAttendance(out[0])
+	case "logAttendance":
+		{ // callExtension ["serverEvent", [_hash] call CBA_fnc_encodeJSON];
+			if argc == 1 {
+				go writeAttendance(out[0])
+			}
 		}
 	}
 
