@@ -14,9 +14,10 @@ AttendanceTracker setVariable ["missionContext", createHashMapFromArray [
 
 // store all user details in a hash when they connect so we can reference it in disconnect events
 AttendanceTracker setVariable ["allUsers", createHashMap];
+missionNamespace getVariable ["AttendanceTracker_debug", false];
 
 private _database = "AttendanceTracker" callExtension "connectDB";
-systemChat "AttendanceTracker: Connecting to database...";
+// systemChat "AttendanceTracker: Connecting to database...";
 ["Connecting to database...", "INFO"] call attendanceTracker_fnc_log;
 
 {

@@ -143,6 +143,7 @@ type AttendanceLogItem struct {
 	MissionStart      string `json:"missionStart"`
 	// situational
 	EventType       string `json:"eventType"`
+	PlayerId        string `json:"playerId"`
 	PlayerUID       string `json:"playerUID"`
 	ProfileName     string `json:"profileName"`
 	SteamName       string `json:"steamName"`
@@ -180,7 +181,7 @@ func writeAttendance(data string) {
 
 	// send to DB
 
-	result, err := db.ExecContext(context.Background(), `INSERT INTO AttendanceLog (timestamp, mission_name, briefing_name, mission_name_source, on_load_name, author, server_name, server_profile, mission_start, event_type, player_uid, profile_name, steam_name, is_jip, role_description) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	result, err := db.ExecContext(context.Background(), `INSERT INTO AttendanceLog (timestamp, mission_name, briefing_name, mission_name_source, on_load_name, author, server_name, server_profile, mission_start, event_type, player_id, player_uid, profile_name, steam_name, is_jip, role_description) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		now,
 		event.MissionName,
 		event.BriefingName,
@@ -191,6 +192,7 @@ func writeAttendance(data string) {
 		event.ServerProfile,
 		t,
 		event.EventType,
+		event.PlayerId,
 		event.PlayerUID,
 		event.ProfileName,
 		event.SteamName,
