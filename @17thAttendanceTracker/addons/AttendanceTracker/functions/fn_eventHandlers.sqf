@@ -62,6 +62,7 @@
 		] call attendanceTracker_fnc_logMissionEvent;
 	}],
 	["PlayerDisconnected", {
+		// NOTE: HandleDisconnect returns a DIFFERENT _id than PlayerDisconnected and above handlers, so we can't use it here
 		params ["_id", "_uid", "_name", "_jip", "_owner", "_idstr"];
 
 		[format ["(EventHandler) HandleDisconnect fired: %1", _this], "DEBUG"] call attendanceTracker_fnc_log;
