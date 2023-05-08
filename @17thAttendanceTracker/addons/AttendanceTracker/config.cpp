@@ -14,6 +14,7 @@ class CfgFunctions {
 		class functions {
 			file = "\AttendanceTracker\functions";
 			class postInit {postInit = 1;};
+			class connectDB {};
 			class eventHandlers {};
 			class callbackHandler {postInit = 1;};
 			class log {};

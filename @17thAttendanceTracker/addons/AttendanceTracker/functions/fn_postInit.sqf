@@ -1,6 +1,9 @@
 
 AttendanceTracker = false call CBA_fnc_createNamespace;
 
+AttendanceTracker_missionStartTimestamp = call attendanceTracker_fnc_timestamp;
+AttendanceTracker_missionHash = "AttendanceTracker" callExtension ["getMissionHash", AttendanceTracker_missionStartTimestamp];
+
 AttendanceTracker setVariable ["missionContext", createHashMapFromArray [
 	["missionName", missionName],
 	["briefingName", briefingName],
@@ -9,16 +12,17 @@ AttendanceTracker setVariable ["missionContext", createHashMapFromArray [
 	["author", getMissionConfigValue ["author", ""]],
 	["serverName", serverName],
 	["serverProfile", profileName],
-	["missionStart", call attendanceTracker_fnc_timestamp]
+	["missionStart", AttendanceTracker_missionStartTimestamp],
+	["missionHash", AttendanceTracker_missionHash]
 ]];
+
+
 
 // store all user details in a hash when they connect so we can reference it in disconnect events
 AttendanceTracker setVariable ["allUsers", createHashMap];
-missionNamespace getVariable ["AttendanceTracker_debug", false];
+missionNamespace setVariable ["AttendanceTracker_debug", false];
 
-private _database = "AttendanceTracker" callExtension "connectDB";
-// systemChat "AttendanceTracker: Connecting to database...";
-["Connecting to database...", "INFO"] call attendanceTracker_fnc_log;
+call attendanceTracker_fnc_connectDB;
 
 {
 	if (!isServer) exitWith {};

@@ -10,6 +10,7 @@ import "C" // This is required to import the C code
 
 import (
 	"context"
+	"crypto/md5"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -103,6 +104,18 @@ func loadConfig() {
 	writeLog(functionName, `["Config loaded", "INFO"]`)
 }
 
+func getMissionHash(time string) string {
+	functionName := "getMissionHash"
+	// get md5 hash of string
+	// https://stackoverflow.com/questions/2377881/how-to-get-a-md5-hash-from-a-string-in-golang
+	hash := md5.Sum([]byte(time))
+
+	// convert to string
+	hashString := fmt.Sprintf("%x", hash)
+	writeLog(functionName, fmt.Sprintf(`["Mission hash: %s", "INFO"]`, hashString))
+	return hashString
+}
+
 func connectDB() string {
 	functionName := "connectDB"
 	var err error
@@ -142,10 +155,80 @@ func connectDB() string {
 		return "ERROR"
 	}
 	writeLog(functionName, fmt.Sprintf(`["Connected to MySQL/MariaDB version %s", "INFO"]`, version))
+	writeLog(functionName, `["SUCCESS", "INFO"]`)
 	return version
 }
 
-type AttendanceLogItem struct {
+type WorldInfo struct {
+	WorldName  string `json:"worldName"`
+	Author     string `json:"author"`
+	WorldSize  int    `json:"worldSize"`
+	WorkshopID string `json:"workshopID"`
+}
+
+func writeWorldInfo(worldInfo string) {
+	functionName := "writeWorldInfo"
+	// worldInfo is json, parse it
+	var wi WorldInfo
+	err := json.Unmarshal([]byte(worldInfo), &wi)
+	if err != nil {
+		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+		return
+	}
+	// write to log
+	writeLog(functionName, fmt.Sprintf(`["WorldName:%s Author:%s WorldSize:%d WorkshopID:%s", "INFO"]`, wi.WorldName, wi.Author, wi.WorldSize, wi.WorkshopID))
+
+	// write to database
+	// check if world exists
+	var worldID int
+	err = db.QueryRow("SELECT id FROM worlds WHERE workshop_id = ?", wi.WorkshopID).Scan(&worldID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// world does not exist, insert it
+			stmt, err := db.Prepare("INSERT INTO worlds (world_name, author, world_size, workshop_id) VALUES (?, ?, ?, ?)")
+			if err != nil {
+				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+				return
+			}
+			defer stmt.Close()
+			res, err := stmt.Exec(wi.WorldName, wi.Author, wi.WorldSize, wi.WorkshopID)
+			if err != nil {
+				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+				return
+			}
+			lastID, err := res.LastInsertId()
+			if err != nil {
+				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+				return
+			}
+			writeLog(functionName, fmt.Sprintf(`["World inserted with ID %d", "INFO"]`, lastID))
+		} else {
+			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+			return
+		}
+	} else {
+		// world exists, update it
+		stmt, err := db.Prepare("UPDATE worlds SET world_name = ?, author = ?, world_size = ? WHERE id = ?")
+		if err != nil {
+			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+			return
+		}
+		defer stmt.Close()
+		res, err := stmt.Exec(wi.WorldName, wi.Author, wi.WorldSize, worldID)
+		if err != nil {
+			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+			return
+		}
+		rowsAffected, err := res.RowsAffected()
+		if err != nil {
+			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+			return
+		}
+		writeLog(functionName, fmt.Sprintf(`["World updated with %d rows affected", "INFO"]`, rowsAffected))
+	}
+}
+
+type MissionInfo struct {
 	MissionName       string `json:"missionName"`
 	BriefingName      string `json:"briefingName"`
 	MissionNameSource string `json:"missionNameSource"`
@@ -154,7 +237,52 @@ type AttendanceLogItem struct {
 	ServerName        string `json:"serverName"`
 	ServerProfile     string `json:"serverProfile"`
 	MissionStart      string `json:"missionStart"`
-	// situational
+	MissionHash       string `json:"missionHash"`
+}
+
+func writeMissionInfo(missionInfo string) {
+	functionName := "writeMissionInfo"
+	// missionInfo is json, parse it
+	var mi MissionInfo
+	err := json.Unmarshal([]byte(missionInfo), &mi)
+	if err != nil {
+		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+		return
+	}
+
+	// get MySQL friendly datetime
+	// first, convert string to int
+	missionStartTime, err := strconv.ParseInt(mi.MissionStart, 10, 64)
+	if err != nil {
+		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+		return
+	}
+	t := time.Unix(0, missionStartTime).Format("2006-01-02 15:04:05")
+	// write to log
+	writeLog(functionName, fmt.Sprintf(`["MissionName:%s BriefingName:%s MissionNameSource:%s OnLoadName:%s Author:%s ServerName:%s ServerProfile:%s MissionStart:%s MissionHash:%s", "INFO"]`, mi.MissionName, mi.BriefingName, mi.MissionNameSource, mi.OnLoadName, mi.Author, mi.ServerName, mi.ServerProfile, t, mi.MissionHash))
+
+	// write to database
+	// every mission is unique, so insert it
+	stmt, err := db.Prepare("INSERT INTO missions (mission_name, briefing_name, mission_name_source, on_load_name, author, server_name, server_profile, mission_start, mission_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	if err != nil {
+		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+		return
+	}
+	defer stmt.Close()
+	res, err := stmt.Exec(mi.MissionName, mi.BriefingName, mi.MissionNameSource, mi.OnLoadName, mi.Author, mi.ServerName, mi.ServerProfile, t, mi.MissionHash)
+	if err != nil {
+		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+		return
+	}
+	lastID, err := res.LastInsertId()
+	if err != nil {
+		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+		return
+	}
+	writeLog(functionName, fmt.Sprintf(`["Mission inserted with ID %d", "INFO"]`, lastID))
+}
+
+type AttendanceLogItem struct {
 	EventType       string `json:"eventType"`
 	PlayerId        string `json:"playerId"`
 	PlayerUID       string `json:"playerUID"`
@@ -162,6 +290,7 @@ type AttendanceLogItem struct {
 	SteamName       string `json:"steamName"`
 	IsJIP           bool   `json:"isJIP"`
 	RoleDescription string `json:"roleDescription"`
+	MissionHash     string `json:"missionHash"`
 }
 
 func writeAttendance(data string) {
@@ -175,14 +304,6 @@ func writeAttendance(data string) {
 		return
 	}
 
-	// get MySQL friendly datetime
-	// first, convert string to int
-	missionStartTime, err := strconv.ParseInt(event.MissionStart, 10, 64)
-	if err != nil {
-		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
-		return
-	}
-	t := time.Unix(0, missionStartTime).Format("2006-01-02 15:04:05")
 	// get MySQL friendly NOW
 	now := time.Now().Format("2006-01-02 15:04:05")
 
@@ -194,16 +315,8 @@ func writeAttendance(data string) {
 
 	// send to DB
 
-	result, err := db.ExecContext(context.Background(), `INSERT INTO AttendanceLog (timestamp, mission_name, briefing_name, mission_name_source, on_load_name, author, server_name, server_profile, mission_start, event_type, player_id, player_uid, profile_name, steam_name, is_jip, role_description) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	result, err := db.ExecContext(context.Background(), `INSERT INTO AttendanceLog (timestamp, event_type, player_id, player_uid, profile_name, steam_name, is_jip, role_description, mission_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		now,
-		event.MissionName,
-		event.BriefingName,
-		event.MissionNameSource,
-		event.OnLoadName,
-		event.Author,
-		event.ServerName,
-		event.ServerProfile,
-		t,
 		event.EventType,
 		event.PlayerId,
 		event.PlayerUID,
@@ -211,6 +324,7 @@ func writeAttendance(data string) {
 		event.SteamName,
 		event.IsJIP,
 		event.RoleDescription,
+		event.MissionHash,
 	)
 
 	if err != nil {
@@ -261,6 +375,14 @@ func goRVExtensionArgs(output *C.char, outputsize C.size_t, input *C.char, argv 
 			if argc == 1 {
 				go writeAttendance(out[0])
 			}
+		}
+	case "logMission":
+		if argc == 1 {
+			go writeMissionInfo(out[0])
+		}
+	case "logWorld":
+		if argc == 1 {
+			go writeWorldInfo(out[0])
 		}
 	}
 

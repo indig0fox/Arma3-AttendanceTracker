@@ -39,6 +39,21 @@ addMissionEventHandler ["ExtensionCallback", {
 		case "connectDB": {
 			systemChat format ["AttendanceTracker: %1", _response#0];
 			[_response#0, _response#1, _function] call attendanceTracker_fnc_log;
+			if (_response#0 == "SUCCESS") then {
+				missionNamespace setVariable ["AttendanceTracker_DBConnected", true];
+				
+				// log mission info and get back the row Id to send with future messages
+				private _response = "AttendanceTracker" callExtension ["logMission", [
+					[AttendanceTracker getVariable ["missionContext", createHashMap]] call CBA_fnc_encodeJSON
+				]];
+				AttendanceTracker_missionId = parseNumber _response;
+
+
+				// log world info
+				private _response = "AttendanceTracker" callExtension ["logWorld", [
+					[call attendanceTracker_fnc_getWorldInfo] call CBA_fnc_encodeJSON
+				]];
+			};
 		};
 		default {
 			_response call attendanceTracker_fnc_log;

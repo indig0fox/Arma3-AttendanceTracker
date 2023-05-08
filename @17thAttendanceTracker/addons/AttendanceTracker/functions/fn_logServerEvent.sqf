@@ -15,6 +15,7 @@ _hash set ["profileName", _profileName];
 _hash set ["steamName", _steamName];
 _hash set ["isJIP", false];
 _hash set ["roleDescription", ""];
+_hash set ["missionHash", missionNamespace getVariable ["AttendanceTracker_missionHash", ""]];
 
 "AttendanceTracker" callExtension ["logAttendance", [[_hash] call CBA_fnc_encodeJSON]];
 
