@@ -7,31 +7,61 @@
 Create a database with a name of your choosing. Then, run the following SQL command against it to create a table.
 
 ```sql
+-- a3server.attendancelog definition
+
 CREATE TABLE `attendancelog` (
-    `id` INT(11) NOT NULL AUTO_INCREMENT,
-    `timestamp` DATETIME NOT NULL,
-    `event_hash` VARCHAR(100) NOT NULL DEFAULT md5(concat(`server_name`,`mission_name`,`author`,`mission_start`)) COLLATE 'utf8mb3_general_ci',
-    `event_type` VARCHAR(100) NOT NULL COLLATE 'utf8mb3_general_ci',
-    `player_id` VARCHAR(30) NOT NULL COLLATE 'utf8mb3_general_ci',
-    `player_uid` VARCHAR(100) NOT NULL COLLATE 'utf8mb3_general_ci',
-    `profile_name` VARCHAR(100) NOT NULL COLLATE 'utf8mb3_general_ci',
-    `steam_name` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
-    `is_jip` TINYINT(4) NULL DEFAULT NULL,
-    `role_description` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
-    `mission_start` DATETIME NOT NULL,
-    `mission_name` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
-    `briefing_name` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
-    `mission_name_source` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
-    `on_load_name` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
-    `author` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
-    `server_name` VARCHAR(100) NOT NULL COLLATE 'utf8mb3_general_ci',
-    `server_profile` VARCHAR(100) NOT NULL COLLATE 'utf8mb3_general_ci',
-    PRIMARY KEY (`id`) USING BTREE
-)
-COLLATE='utf8mb3_general_ci'
-ENGINE=InnoDB
-AUTO_INCREMENT=383
-;
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `timestamp` datetime NOT NULL,
+  `event_hash` varchar(100) NOT NULL,
+  `event_type` varchar(100) NOT NULL,
+  `player_id` varchar(30) NOT NULL,
+  `player_uid` varchar(100) NOT NULL,
+  `profile_name` varchar(100) NOT NULL,
+  `steam_name` varchar(100) DEFAULT NULL,
+  `is_jip` tinyint(4) DEFAULT NULL,
+  `role_description` varchar(100) DEFAULT NULL,
+  `mission_start` datetime NOT NULL,
+  `mission_name` varchar(100) DEFAULT NULL,
+  `briefing_name` varchar(100) DEFAULT NULL,
+  `mission_name_source` varchar(100) DEFAULT NULL,
+  `on_load_name` varchar(100) DEFAULT NULL,
+  `author` varchar(100) DEFAULT NULL,
+  `server_name` varchar(100) NOT NULL,
+  `server_profile` varchar(100) NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=2713 DEFAULT CHARSET=utf8mb3;
+
+-- a3server.`missions` definition
+
+CREATE TABLE `missions` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `mission_name` varchar(100) NOT NULL,
+  `mission_name_source` varchar(100) DEFAULT NULL,
+  `briefing_name` varchar(100) DEFAULT NULL,
+  `on_load_name` varchar(100) DEFAULT NULL,
+  `author` varchar(100) DEFAULT NULL,
+  `server_name` varchar(100) DEFAULT NULL,
+  `server_profile` varchar(100) DEFAULT NULL,
+  `mission_start` datetime DEFAULT NULL,
+  `mission_hash` varchar(100) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb3;
+
+
+-- a3server.`worlds` definition
+
+CREATE TABLE `worlds` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `author` varchar(100) DEFAULT NULL,
+  `display_name` varchar(100) DEFAULT NULL,
+  `world_name` varchar(100) NOT NULL,
+  `world_name_original` varchar(100) DEFAULT NULL,
+  `world_size` int(11) DEFAULT NULL,
+  `latitude` float DEFAULT NULL,
+  `longitude` float DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb3;
+
 ```
 
 Finally, copy `config.example.json` to `config.json` and update it with your database credentials.

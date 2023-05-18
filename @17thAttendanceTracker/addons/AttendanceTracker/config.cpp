@@ -21,6 +21,7 @@ class CfgFunctions {
 			class logMissionEvent {};
 			class logServerEvent {};
 			class timestamp {};
+			class getHash {};
 		};
 	};
 };

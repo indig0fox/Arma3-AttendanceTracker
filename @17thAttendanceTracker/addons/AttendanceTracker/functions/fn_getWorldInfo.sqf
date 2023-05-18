@@ -14,10 +14,13 @@ _workshopID = '';
 } foreach getLoadedModsInfo;
 
 // [_name, _author, _workshopID];
-
 [
-	["worldName", _name],
 	["author", _author],
+	["workshopID", _workshopID],
+	["displayName", _name],
+	["worldName", toLower worldName],
+	["worldNameOriginal", _name],
 	["worldSize", worldSize],
-	["workshopID", _workshopID]
+	["latitude", getNumber( _world >> "latitude" )],
+	["longitude", getNumber( _world >> "longitude" )]
 ];

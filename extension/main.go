@@ -160,10 +160,14 @@ func connectDB() string {
 }
 
 type WorldInfo struct {
-	WorldName  string `json:"worldName"`
-	Author     string `json:"author"`
-	WorldSize  int    `json:"worldSize"`
-	WorkshopID string `json:"workshopID"`
+	Author            string  `json:"author"`
+	WorkshopID        string  `json:"workshopID"`
+	DisplayName       string  `json:"displayName"`
+	WorldName         string  `json:"worldName"`
+	WorldNameOriginal string  `json:"worldNameOriginal"`
+	WorldSize         int     `json:"worldSize"`
+	Latitude          float32 `json:"latitude"`
+	Longitude         float32 `json:"longitude"`
 }
 
 func writeWorldInfo(worldInfo string) {
@@ -176,7 +180,7 @@ func writeWorldInfo(worldInfo string) {
 		return
 	}
 	// write to log
-	writeLog(functionName, fmt.Sprintf(`["WorldName:%s Author:%s WorldSize:%d WorkshopID:%s", "INFO"]`, wi.WorldName, wi.Author, wi.WorldSize, wi.WorkshopID))
+	writeLog(functionName, fmt.Sprintf(`["Author:%s WorkshopID:%s DisplayName:%s WorldName:%s WorldNameOriginal:%s WorldSize:%d Latitude:%f Longitude:%f", "INFO"]`, wi.Author, wi.WorkshopID, wi.DisplayName, wi.WorldName, wi.WorldNameOriginal, wi.WorldSize, wi.Latitude, wi.Longitude))
 
 	// write to database
 	// check if world exists
@@ -185,13 +189,13 @@ func writeWorldInfo(worldInfo string) {
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// world does not exist, insert it
-			stmt, err := db.Prepare("INSERT INTO worlds (world_name, author, world_size, workshop_id) VALUES (?, ?, ?, ?)")
+			stmt, err := db.Prepare("INSERT INTO worlds (author, workshop_id, display_name, world_name, world_name_original, world_size, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
 			if err != nil {
 				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 				return
 			}
 			defer stmt.Close()
-			res, err := stmt.Exec(wi.WorldName, wi.Author, wi.WorldSize, wi.WorkshopID)
+			res, err := stmt.Exec(wi.Author, wi.WorkshopID, wi.DisplayName, wi.WorldName, wi.WorldNameOriginal, wi.WorldSize, wi.Latitude, wi.Longitude)
 			if err != nil {
 				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 				return
@@ -208,13 +212,13 @@ func writeWorldInfo(worldInfo string) {
 		}
 	} else {
 		// world exists, update it
-		stmt, err := db.Prepare("UPDATE worlds SET world_name = ?, author = ?, world_size = ? WHERE id = ?")
+		stmt, err := db.Prepare("UPDATE worlds SET author = ?, workshop_id = ?, display_name = ?, world_name = ?, world_name_original = ?, world_size = ?, latitude = ?, longitude = ? WHERE id = ?")
 		if err != nil {
 			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 			return
 		}
 		defer stmt.Close()
-		res, err := stmt.Exec(wi.WorldName, wi.Author, wi.WorldSize, worldID)
+		res, err := stmt.Exec(wi.Author, wi.WorkshopID, wi.DisplayName, wi.WorldName, wi.WorldNameOriginal, wi.WorldSize, wi.Latitude, wi.Longitude, worldID)
 		if err != nil {
 			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 			return
@@ -269,7 +273,7 @@ func writeMissionInfo(missionInfo string) {
 		return
 	}
 	defer stmt.Close()
-	res, err := stmt.Exec(mi.MissionName, mi.BriefingName, mi.MissionNameSource, mi.OnLoadName, mi.Author, mi.ServerName, mi.ServerProfile, t, mi.MissionHash)
+	res, err := stmt.Exec(mi.MissionName, mi.BriefingName, mi.MissionNameSource, mi.OnLoadName, mi.Author, mi.ServerName, mi.ServerProfile, t, mi.MissionStart, mi.MissionHash)
 	if err != nil {
 		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 		return
@@ -315,7 +319,7 @@ func writeAttendance(data string) {
 
 	// send to DB
 
-	result, err := db.ExecContext(context.Background(), `INSERT INTO AttendanceLog (timestamp, event_type, player_id, player_uid, profile_name, steam_name, is_jip, role_description, mission_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	result, err := db.ExecContext(context.Background(), `INSERT INTO AttendanceLog (event_time, event_type, player_id, player_uid, profile_name, steam_name, is_jip, role_description, mission_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		now,
 		event.EventType,
 		event.PlayerId,
@@ -383,6 +387,12 @@ func goRVExtensionArgs(output *C.char, outputsize C.size_t, input *C.char, argv 
 	case "logWorld":
 		if argc == 1 {
 			go writeWorldInfo(out[0])
+		}
+	case "getMissionHash":
+		{
+			if argc == 1 {
+				go getMissionHash(out[0])
+			}
 		}
 	}
 

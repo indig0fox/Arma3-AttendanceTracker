@@ -2,7 +2,7 @@
 AttendanceTracker = false call CBA_fnc_createNamespace;
 
 AttendanceTracker_missionStartTimestamp = call attendanceTracker_fnc_timestamp;
-AttendanceTracker_missionHash = "AttendanceTracker" callExtension ["getMissionHash", AttendanceTracker_missionStartTimestamp];
+AttendanceTracker_missionHash = [AttendanceTracker_missionStartTimestamp] call attendanceTracker_fnc_getMissionHash;
 
 AttendanceTracker setVariable ["missionContext", createHashMapFromArray [
 	["missionName", missionName],
