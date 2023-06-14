@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -108,11 +110,11 @@ func loadConfig() {
 	writeLog(functionName, `["Config loaded", "INFO"]`)
 }
 
-func getMissionHash(time string) string {
+func getMissionHash() string {
 	functionName := "getMissionHash"
 	// get md5 hash of string
 	// https://stackoverflow.com/questions/2377881/how-to-get-a-md5-hash-from-a-string-in-golang
-	hash := md5.Sum([]byte(time))
+	hash := md5.Sum([]byte(time.Now().Format("2006-01-02 15:04:05")))
 
 	// convert to string
 	hashString := fmt.Sprintf("%x", hash)
@@ -176,9 +178,11 @@ type WorldInfo struct {
 
 func writeWorldInfo(worldInfo string) {
 	functionName := "writeWorldInfo"
+	writeLog(functionName, fmt.Sprintf(`["%s", "DEBUG"]`, worldInfo))
 	// worldInfo is json, parse it
 	var wi WorldInfo
-	err := json.Unmarshal([]byte(worldInfo), &wi)
+	fixedString := fixEscapeQuotes(trimQuotes(worldInfo))
+	err := json.Unmarshal([]byte(fixedString), &wi)
 	if err != nil {
 		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 		return
@@ -256,9 +260,11 @@ type MissionInfo struct {
 
 func writeMissionInfo(missionInfo string) {
 	functionName := "writeMissionInfo"
+	writeLog(functionName, fmt.Sprintf(`["%s", "DEBUG"]`, missionInfo))
 	// missionInfo is json, parse it
 	var mi MissionInfo
-	err := json.Unmarshal([]byte(missionInfo), &mi)
+	fixedString := fixEscapeQuotes(trimQuotes(missionInfo))
+	err := json.Unmarshal([]byte(fixedString), &mi)
 	if err != nil {
 		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 		return
@@ -286,7 +292,7 @@ func writeMissionInfo(missionInfo string) {
 		return
 	}
 	defer stmt.Close()
-	res, err := stmt.Exec(mi.MissionName, mi.BriefingName, mi.MissionNameSource, mi.OnLoadName, mi.Author, mi.ServerName, mi.ServerProfile, t, mi.MissionStart, mi.MissionHash)
+	res, err := stmt.Exec(mi.MissionName, mi.BriefingName, mi.MissionNameSource, mi.OnLoadName, mi.Author, mi.ServerName, mi.ServerProfile, mi.MissionStart, mi.MissionHash)
 	if err != nil {
 		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 		return
@@ -297,6 +303,7 @@ func writeMissionInfo(missionInfo string) {
 		return
 	}
 	writeLog(functionName, fmt.Sprintf(`["Mission inserted with ID %d", "INFO"]`, lastID))
+	writeLog(functionName, fmt.Sprintf(`["MISSION_ID", "%d"]`, lastID))
 }
 
 type AttendanceLogItem struct {
@@ -332,13 +339,11 @@ func writeAttendance(data string) {
 		return
 	}
 
-	//
 	// send to DB
-
 	result, err := db.ExecContext(
 		context.Background(),
 		fmt.Sprintf(
-			`INSERT INTO %s (join_time, disconnect_time, event_type, player_id, player_uid, profile_name, steam_name, is_jip, role_description, mission_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO %s (join_time, event_type, player_id, player_uid, profile_name, steam_name, is_jip, role_description, mission_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			ATTENDANCE_TABLE,
 		),
 		now,
@@ -364,7 +369,7 @@ func writeAttendance(data string) {
 	}
 
 	writeLog(functionName, fmt.Sprintf(`["Saved attendance for %s to row id %d", "INFO"]`, event.ProfileName, id))
-	writeLog(functionName, fmt.Sprintf(`["ATT_LOG", ["%s", %d]]`, event.PlayerId, id))
+	writeLog(functionName, fmt.Sprintf(`["ATT_LOG", ["%s", "%d"]]`, event.PlayerId, id))
 
 }
 
@@ -469,12 +474,6 @@ func goRVExtensionArgs(output *C.char, outputsize C.size_t, input *C.char, argv 
 		if argc == 1 {
 			go writeWorldInfo(out[0])
 		}
-	case "getMissionHash":
-		{
-			if argc == 1 {
-				go getMissionHash(out[0])
-			}
-		}
 	}
 
 	// Return a result to Arma
@@ -502,9 +501,10 @@ func callBackExample() {
 	}
 }
 
-func getTimestamp() int64 {
+func getTimestamp() string {
 	// get the current unix timestamp in nanoseconds
-	return time.Now().UnixNano()
+	// return time.Now().Local().Unix()
+	return time.Now().Format("2006-01-02 15:04:05")
 }
 
 func trimQuotes(s string) string {
@@ -526,6 +526,9 @@ func writeLog(functionName string, data string) {
 	defer C.free(unsafe.Pointer(statusParam))
 	runExtensionCallback(statusName, statusFunction, statusParam)
 
+	// get calling function & line
+	_, file, line, _ := runtime.Caller(1)
+	log.Printf(`%s:%d: %s`, path.Base(file), line, data)
 	log.Printf(`%s: %s`, functionName, data)
 }
 
@@ -542,12 +545,12 @@ func goRVExtension(output *C.char, outputsize C.size_t, input *C.char) {
 	case "getDir":
 		temp = getDir()
 	case "getTimestamp":
-		time := getTimestamp()
-		temp = fmt.Sprintf(`["%s"]`, strconv.FormatInt(time, 10))
+		temp = fmt.Sprintf(`["%s"]`, getTimestamp())
 	case "connectDB":
 		go connectDB()
 		temp = fmt.Sprintf(`["%s"]`, "Connecting to DB")
-
+	case "getMissionHash":
+		temp = fmt.Sprintf(`["%s"]`, getMissionHash())
 	default:
 		temp = fmt.Sprintf(`["%s"]`, "Unknown Function")
 	}
