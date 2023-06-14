@@ -32,6 +32,10 @@ var ADDON_FOLDER string = getDir() + "\\@AttendanceTracker"
 var LOG_FILE string = ADDON_FOLDER + "\\attendanceTracker.log"
 var CONFIG_FILE string = ADDON_FOLDER + "\\config.json"
 
+var ATTENDANCE_TABLE string = "attendance"
+var MISSIONS_TABLE string = "missions"
+var WORLDS_TABLE string = "worlds"
+
 var ATConfig AttendanceTrackerConfig
 
 type AttendanceTrackerConfig struct {
@@ -189,7 +193,10 @@ func writeWorldInfo(worldInfo string) {
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// world does not exist, insert it
-			stmt, err := db.Prepare("INSERT INTO worlds (author, workshop_id, display_name, world_name, world_name_original, world_size, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+			stmt, err := db.Prepare(fmt.Sprintf(
+				"INSERT INTO %s (author, workshop_id, display_name, world_name, world_name_original, world_size, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+				WORLDS_TABLE,
+			))
 			if err != nil {
 				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 				return
@@ -212,7 +219,10 @@ func writeWorldInfo(worldInfo string) {
 		}
 	} else {
 		// world exists, update it
-		stmt, err := db.Prepare("UPDATE worlds SET author = ?, workshop_id = ?, display_name = ?, world_name = ?, world_name_original = ?, world_size = ?, latitude = ?, longitude = ? WHERE id = ?")
+		stmt, err := db.Prepare(fmt.Sprintf(
+			"UPDATE %s SET author = ?, workshop_id = ?, display_name = ?, world_name = ?, world_name_original = ?, world_size = ?, latitude = ?, longitude = ? WHERE id = ?",
+			WORLDS_TABLE,
+		))
 		if err != nil {
 			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 			return
@@ -267,7 +277,10 @@ func writeMissionInfo(missionInfo string) {
 
 	// write to database
 	// every mission is unique, so insert it
-	stmt, err := db.Prepare("INSERT INTO missions (mission_name, briefing_name, mission_name_source, on_load_name, author, server_name, server_profile, mission_start, mission_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+	stmt, err := db.Prepare(fmt.Sprintf(
+		"INSERT INTO %s (mission_name, briefing_name, mission_name_source, on_load_name, author, server_name, server_profile, mission_start, mission_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		MISSIONS_TABLE,
+	))
 	if err != nil {
 		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 		return
@@ -295,6 +308,8 @@ type AttendanceLogItem struct {
 	IsJIP           bool   `json:"isJIP"`
 	RoleDescription string `json:"roleDescription"`
 	MissionHash     string `json:"missionHash"`
+	//
+	RowID int64 `json:"rowID"` // optional
 }
 
 func writeAttendance(data string) {
@@ -317,9 +332,15 @@ func writeAttendance(data string) {
 		return
 	}
 
+	//
 	// send to DB
 
-	result, err := db.ExecContext(context.Background(), `INSERT INTO AttendanceLog (event_time, event_type, player_id, player_uid, profile_name, steam_name, is_jip, role_description, mission_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	result, err := db.ExecContext(
+		context.Background(),
+		fmt.Sprintf(
+			`INSERT INTO %s (join_time, disconnect_time, event_type, player_id, player_uid, profile_name, steam_name, is_jip, role_description, mission_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			ATTENDANCE_TABLE,
+		),
 		now,
 		event.EventType,
 		event.PlayerId,
@@ -343,7 +364,60 @@ func writeAttendance(data string) {
 	}
 
 	writeLog(functionName, fmt.Sprintf(`["Saved attendance for %s to row id %d", "INFO"]`, event.ProfileName, id))
+	writeLog(functionName, fmt.Sprintf(`["ATT_LOG", ["%s", %d]]`, event.PlayerId, id))
 
+}
+
+type DisconnectItem struct {
+	PlayerId string `json:"playerId"`
+	RowId    int64  `json:"rowId"`
+}
+
+func writeDisconnectEvent(data string) {
+	functionName := "writeDisconnectEvent"
+	// data is json, parse it
+	stringjson := fixEscapeQuotes(trimQuotes(data))
+	var event DisconnectItem
+	err := json.Unmarshal([]byte(stringjson), &event)
+	if err != nil {
+		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+		return
+	}
+
+	// get MySQL friendly NOW
+	now := time.Now().Format("2006-01-02 15:04:05")
+
+	// prevent crash
+	if db == nil {
+		writeLog(functionName, `["db is nil", "ERROR"]`)
+		return
+	}
+
+	// send to DB
+	result, err := db.ExecContext(
+		context.Background(),
+		fmt.Sprintf(
+			`UPDATE %s SET disconnect_time = ? WHERE id = ?`,
+			ATTENDANCE_TABLE,
+		),
+		now,
+		event.RowId,
+	)
+
+	if err != nil {
+		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+		return
+	}
+
+	if rowsAffected == 1 {
+		writeLog(functionName, fmt.Sprintf(`["Saved disconnect event for %s to row id %d", "INFO"]`, event.PlayerId, event.RowId))
+	}
 }
 
 func runExtensionCallback(name *C.char, function *C.char, data *C.char) C.int {
@@ -374,10 +448,17 @@ func goRVExtensionArgs(output *C.char, outputsize C.size_t, input *C.char, argv 
 	temp := fmt.Sprintf("Function: %s nb params: %d", C.GoString(input), argc)
 
 	switch C.GoString(input) {
-	case "logAttendance":
-		{ // callExtension ["serverEvent", [_hash] call CBA_fnc_encodeJSON];
+	case "writeAttendance":
+		{ // callExtension ["logAttendance", [_hash] call CBA_fnc_encodeJSON]];
 			if argc == 1 {
 				go writeAttendance(out[0])
+			}
+		}
+	case "writeDisconnectEvent":
+		{ // callExtension ["writeDisconnectEvent", [[_hash] call CBA_fnc_encodeJSON]];
+
+			if argc == 1 {
+				go writeDisconnectEvent(out[0])
 			}
 		}
 	case "logMission":

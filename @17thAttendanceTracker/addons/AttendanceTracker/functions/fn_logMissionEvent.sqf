@@ -5,7 +5,8 @@ params [
 	["_profileName", ""],
 	["_steamName", ""],
 	["_isJIP", false, [true, false]],
-	["_roleDescription", ""]
+	["_roleDescription", ""],
+	["_rowID", nil]
 ];
 
 private _hash = + (AttendanceTracker getVariable ["missionContext", createHashMap]);
@@ -18,6 +19,11 @@ _hash set ["isJIP", _isJIP];
 _hash set ["roleDescription", _roleDescription];
 _hash set ["missionHash", missionNamespace getVariable ["AttendanceTracker_missionHash", ""]];
 
-"AttendanceTracker" callExtension ["logAttendance", [[_hash] call CBA_fnc_encodeJSON]];
+if (!isNil "_rowID") then {
+	_hash set ["rowID", _rowID];
+	"AttendanceTracker" callExtension ["writeDisconnectEvent", [[_hash] call CBA_fnc_encodeJSON]];
+} else {
+	"AttendanceTracker" callExtension ["writeAttendance", [[_hash] call CBA_fnc_encodeJSON]];
+};
 
 true;

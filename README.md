@@ -29,7 +29,7 @@ CREATE TABLE `attendancelog` (
   `server_name` varchar(100) NOT NULL,
   `server_profile` varchar(100) NOT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2713 DEFAULT CHARSET=utf8mb3;
+) ENGINE=InnoDB AUTO_INCREMENT=0 DEFAULT CHARSET=utf8mb3;
 
 -- a3server.`missions` definition
 

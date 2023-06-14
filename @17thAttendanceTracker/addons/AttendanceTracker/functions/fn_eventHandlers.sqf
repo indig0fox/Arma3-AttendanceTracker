@@ -8,15 +8,16 @@
 		_userInfo params ["_playerID", "_ownerId", "_playerUID", "_profileName", "_displayName", "_steamName", "_clientState", "_isHC", "_adminState", "_networkInfo", "_unit"];
 		if (_isHC) exitWith {};
 
+		(AttendanceTracker getVariable ["allUsers", createHashMap]) set [_networkId, _userInfo];
 		[
-			"ConnectedServer",
+			"Server",
 			_playerID,
 			_playerUID,
 			_profileName,
-			_steamName
-		] call attendanceTracker_fnc_logServerEvent;
+			_steamName,
+			nil // send rowId on d/c only
+		] call attendanceTracker_fnc_writeAttendance;
 
-		(AttendanceTracker getVariable ["allUsers", createHashMap]) set [_networkId, _userInfo];
 	}],
 	["OnUserDisconnected", {
 		params ["_networkId", "_clientStateNumber", "_clientState"];
@@ -26,16 +27,17 @@
 		private _userInfo = (AttendanceTracker getVariable ["allUsers", createHashMap]) get _networkId;
 		if (isNil "_userInfo") exitWith {};
 
-		_userInfo params ["_playerID", "_ownerId", "_playerUID", "_profileName", "_displayName", "_steamName", "_clientState", "_isHC", "_adminState", "_networkInfo", "_unit"];
+		_userInfo params ["_playerID", "_ownerId", "_playerUID", "_profileName", "_displayName", "_steamName", "_clientState", "_isHC", "_adminState", "_networkInfo", "_unit", "_rowId"];
 		if (_isHC) exitWith {};
 
 		[
-			"DisconnectedServer",
+			"Server",
 			_playerID,
 			_playerUID,
 			_profileName,
-			_steamName
-		] call attendanceTracker_fnc_logServerEvent;
+			_steamName,
+			(if (!isNil "_rowId") then {_rowId} else {nil}) // send rowId on d/c only
+		] call attendanceTracker_fnc_writeAttendance;
 	}],
 	["PlayerConnected", {
 		params ["_id", "_uid", "_name", "_jip", "_owner", "_idstr"];
@@ -46,19 +48,18 @@
 		if (isNil "_userInfo") exitWith {};
 
 		_userInfo params ["_playerID", "_ownerId", "_playerUID", "_profileName", "_displayName", "_steamName", "_clientState", "_isHC", "_adminState", "_networkInfo", "_unit"];
+		if (_isHC) exitWith {};
 
 		(AttendanceTracker getVariable ["allUsers", createHashMap]) set [_playerID, _userInfo];
-
-		if (_isHC) exitWith {};
-		
 		[
-			"ConnectedMission",
+			"Mission",
 			_playerID,
 			_playerUID,
 			_profileName,
 			_steamName,
 			_jip,
-			roleDescription _unit
+			roleDescription _unit,
+			nil // send rowId on d/c only
 		] call attendanceTracker_fnc_logMissionEvent;
 	}],
 	["PlayerDisconnected", {
@@ -72,17 +73,18 @@
 			[format ["(EventHandler) HandleDisconnect: No user info found for %1", _idstr], "DEBUG"] call attendanceTracker_fnc_log;
 		};
 
-		_userInfo params ["_playerID", "_ownerId", "_playerUID", "_profileName", "_displayName", "_steamName", "_clientState", "_isHC", "_adminState", "_networkInfo", "_unit"];
-
+		_userInfo params ["_playerID", "_ownerId", "_playerUID", "_profileName", "_displayName", "_steamName", "_clientState", "_isHC", "_adminState", "_networkInfo", "_unit", "_rowId"];
 		if (_isHC) exitWith {};
 		
 		[
-			"DisconnectedMission",
+			"Mission",
 			_playerID,
 			_playerUID,
 			_profileName,
 			_steamName,
-			_jip
+			_jip,
+			nil,
+			(if (!isNil "_rowId") then {_rowId} else {nil}) // send rowId on d/c only
 		] call attendanceTracker_fnc_logMissionEvent;
 		
 

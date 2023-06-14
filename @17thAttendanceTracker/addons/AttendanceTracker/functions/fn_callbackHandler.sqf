@@ -55,6 +55,12 @@ addMissionEventHandler ["ExtensionCallback", {
 				]];
 			};
 		};
+		case "writeAttendance": {
+			if (_response#0 == "ATT_LOG") then {
+				_response params ["_netId", "_rowId"];
+				((AttendanceTracker getVariable ["allUsers", createHashMap]) get _netId) set ["_rowID", _rowID];
+			};
+		};
 		default {
 			_response call attendanceTracker_fnc_log;
 		};
