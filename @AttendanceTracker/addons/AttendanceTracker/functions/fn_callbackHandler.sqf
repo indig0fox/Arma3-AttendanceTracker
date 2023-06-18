@@ -61,13 +61,13 @@ addMissionEventHandler ["ExtensionCallback", {
 		};
 		case "writeMissionInfo": {
 			if (_response#0 == "MISSION_ID") then {
-				AttendanceTracker_missionId = parseNumber _response;
+				AttendanceTracker_missionId = parseNumber (_response#1);
 			};
 		};
 		case "writeAttendance": {
 			if (_response#0 == "ATT_LOG") then {
 				_response params ["_netId", "_rowId"];
-				((AttendanceTracker getVariable ["allUsers", createHashMap]) get _netId) set ["_rowID", _rowID];
+				((AttendanceTracker getVariable ["allUsers", createHashMap]) get _netId) append _rowID;
 			};
 		};
 		default {

@@ -8,7 +8,7 @@ systemTimeUTC params [
 	"_day",
 	"_hour",
 	"_minute",
-	"_second"
+	"_second",
 	"_millisecond"
 ];
 

@@ -9,7 +9,7 @@ params [
 
 
 private _hash = + (AttendanceTracker getVariable ["missionContext", createHashMap]);
-_hash set ["networkId", netID player]
+_hash set ["networkId", netID player];
 _hash set ["eventType", _eventType];
 _hash set ["playerId", _playerId];
 _hash set ["playerUID", _playerUID];

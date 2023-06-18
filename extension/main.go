@@ -18,7 +18,6 @@ import (
 	"os"
 	"path"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 	"unsafe"
@@ -37,6 +36,8 @@ var CONFIG_FILE string = ADDON_FOLDER + "\\config.json"
 var ATTENDANCE_TABLE string = "attendance"
 var MISSIONS_TABLE string = "missions"
 var WORLDS_TABLE string = "worlds"
+
+// ! TODO make a hash to save key:netId from A3 value:rowId from join event
 
 var ATConfig AttendanceTrackerConfig
 
@@ -117,7 +118,7 @@ func getMissionHash() string {
 	hash := md5.Sum([]byte(time.Now().Format("2006-01-02 15:04:05")))
 
 	// convert to string
-	hashString := fmt.Sprintf("%x", hash)
+	hashString := fmt.Sprintf(`%x`, hash)
 	writeLog(functionName, fmt.Sprintf(`["Mission hash: %s", "INFO"]`, hashString))
 	return hashString
 }
@@ -260,7 +261,7 @@ type MissionInfo struct {
 
 func writeMissionInfo(missionInfo string) {
 	functionName := "writeMissionInfo"
-	writeLog(functionName, fmt.Sprintf(`["%s", "DEBUG"]`, missionInfo))
+	// writeLog(functionName, fmt.Sprintf(`["%s", "DEBUG"]`, missionInfo))
 	// missionInfo is json, parse it
 	var mi MissionInfo
 	fixedString := fixEscapeQuotes(trimQuotes(missionInfo))
@@ -271,15 +272,9 @@ func writeMissionInfo(missionInfo string) {
 	}
 
 	// get MySQL friendly datetime
-	// first, convert string to int
-	missionStartTime, err := strconv.ParseInt(mi.MissionStart, 10, 64)
-	if err != nil {
-		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
-		return
-	}
-	t := time.Unix(0, missionStartTime).Format("2006-01-02 15:04:05")
+
 	// write to log
-	writeLog(functionName, fmt.Sprintf(`["MissionName:%s BriefingName:%s MissionNameSource:%s OnLoadName:%s Author:%s ServerName:%s ServerProfile:%s MissionStart:%s MissionHash:%s", "INFO"]`, mi.MissionName, mi.BriefingName, mi.MissionNameSource, mi.OnLoadName, mi.Author, mi.ServerName, mi.ServerProfile, t, mi.MissionHash))
+	writeLog(functionName, fmt.Sprintf(`["MissionName:%s BriefingName:%s MissionNameSource:%s OnLoadName:%s Author:%s ServerName:%s ServerProfile:%s MissionStart:%s MissionHash:%s", "INFO"]`, mi.MissionName, mi.BriefingName, mi.MissionNameSource, mi.OnLoadName, mi.Author, mi.ServerName, mi.ServerProfile, mi.MissionStart, mi.MissionHash))
 
 	// write to database
 	// every mission is unique, so insert it
