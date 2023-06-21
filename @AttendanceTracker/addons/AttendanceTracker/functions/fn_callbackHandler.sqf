@@ -21,11 +21,16 @@ addMissionEventHandler ["ExtensionCallback", {
 		false;
 	};
 
+	diag_log format ["Raw callback: %1: %2", _function, _data];
+
 	// Parse response from string array
 	private "_response";
 	try {
 		// diag_log format ["Raw callback: %1: %2", _function, _data];
 		_response = parseSimpleArray _data;
+		if (_response isEqualTo []) then {
+			throw "Failed to parse response as array";
+		};
 	} catch {
 		[
 			format ["Callback invalid data: %1: %2: %3", _function, _data, _exception],
@@ -66,8 +71,12 @@ addMissionEventHandler ["ExtensionCallback", {
 		};
 		case "writeAttendance": {
 			if (_response#0 == "ATT_LOG") then {
-				_response params ["_netId", "_rowId"];
-				((AttendanceTracker getVariable ["allUsers", createHashMap]) get _netId) append _rowID;
+				(_response#1) params ["_eventType", "_netId", "_rowId"];
+				private _storeIndex = ["SERVER", "MISSION"] find _eventType;
+				((AttendanceTracker getVariable ["rowIds", createHashMap]) getOrDefault [
+					_netId,
+					[nil, nil]
+				]) set [_storeIndex, _rowId];
 			};
 		};
 		default {

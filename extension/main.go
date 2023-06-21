@@ -179,7 +179,7 @@ type WorldInfo struct {
 
 func writeWorldInfo(worldInfo string) {
 	functionName := "writeWorldInfo"
-	writeLog(functionName, fmt.Sprintf(`["%s", "DEBUG"]`, worldInfo))
+	// writeLog(functionName, fmt.Sprintf(`["%s", "DEBUG"]`, worldInfo))
 	// worldInfo is json, parse it
 	var wi WorldInfo
 	fixedString := fixEscapeQuotes(trimQuotes(worldInfo))
@@ -188,8 +188,8 @@ func writeWorldInfo(worldInfo string) {
 		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 		return
 	}
-	// write to log
-	writeLog(functionName, fmt.Sprintf(`["Author:%s WorkshopID:%s DisplayName:%s WorldName:%s WorldNameOriginal:%s WorldSize:%d Latitude:%f Longitude:%f", "INFO"]`, wi.Author, wi.WorkshopID, wi.DisplayName, wi.WorldName, wi.WorldNameOriginal, wi.WorldSize, wi.Latitude, wi.Longitude))
+	// write to log as json
+	// writeLog(functionName, fmt.Sprintf(`["%s", "DEBUG"]`, json.Marshal(wi)))
 
 	// write to database
 	// check if world exists
@@ -273,8 +273,8 @@ func writeMissionInfo(missionInfo string) {
 
 	// get MySQL friendly datetime
 
-	// write to log
-	writeLog(functionName, fmt.Sprintf(`["MissionName:%s BriefingName:%s MissionNameSource:%s OnLoadName:%s Author:%s ServerName:%s ServerProfile:%s MissionStart:%s MissionHash:%s", "INFO"]`, mi.MissionName, mi.BriefingName, mi.MissionNameSource, mi.OnLoadName, mi.Author, mi.ServerName, mi.ServerProfile, mi.MissionStart, mi.MissionHash))
+	// write to log as json
+	// writeLog(functionName, fmt.Sprintf(`["%s", "DEBUG"]`, mi))
 
 	// write to database
 	// every mission is unique, so insert it
@@ -364,13 +364,17 @@ func writeAttendance(data string) {
 	}
 
 	writeLog(functionName, fmt.Sprintf(`["Saved attendance for %s to row id %d", "INFO"]`, event.ProfileName, id))
-	writeLog(functionName, fmt.Sprintf(`["ATT_LOG", ["%s", "%d"]]`, event.PlayerId, id))
+	if event.EventType == "Server" {
+		writeLog(functionName, fmt.Sprintf(`["ATT_LOG", ["SERVER", "%s", "%d"]]`, event.PlayerId, id))
+	} else if event.EventType == "Mission" {
+		writeLog(functionName, fmt.Sprintf(`["ATT_LOG", ["MISSION", "%s", "%d"]]`, event.PlayerId, id))
+	}
 
 }
 
 type DisconnectItem struct {
 	PlayerId string `json:"playerId"`
-	RowId    int64  `json:"rowId"`
+	RowId    string `json:"rowId"`
 }
 
 func writeDisconnectEvent(data string) {
@@ -416,7 +420,7 @@ func writeDisconnectEvent(data string) {
 	}
 
 	if rowsAffected == 1 {
-		writeLog(functionName, fmt.Sprintf(`["Saved disconnect event for %s to row id %d", "INFO"]`, event.PlayerId, event.RowId))
+		writeLog(functionName, fmt.Sprintf(`["Saved disconnect event for %s to row id %s", "INFO"]`, event.PlayerId, event.RowId))
 	}
 }
 

@@ -23,6 +23,7 @@ class CfgFunctions {
 			class timestamp {};
 			class getMissionHash {};
 			class getWorldInfo {};
+			class missionLoaded {};
 		};
 	};
 };
