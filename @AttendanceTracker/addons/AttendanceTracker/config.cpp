@@ -18,8 +18,8 @@ class CfgFunctions {
 			class eventHandlers {};
 			class callbackHandler {postInit = 1;};
 			class log {};
-			class logMissionEvent {};
-			class logServerEvent {};
+			class writeConnect {};
+			class writeDisconnect {};
 			class timestamp {};
 			class getMissionHash {};
 			class getWorldInfo {};

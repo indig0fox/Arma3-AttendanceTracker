@@ -46,6 +46,9 @@ addMissionEventHandler ["ExtensionCallback", {
 			[_response#0, _response#1, _function] call attendanceTracker_fnc_log;
 			if (_response#0 == "SUCCESS") then {
 				missionNamespace setVariable ["AttendanceTracker_DBConnected", true];
+
+				// close any null disconnect values from previous mission
+				"AttendanceTracker" callExtension ["fillLastMissionNull", []];
 				
 				// log mission info and get back the row Id to send with future messages
 				private _response = "AttendanceTracker" callExtension [

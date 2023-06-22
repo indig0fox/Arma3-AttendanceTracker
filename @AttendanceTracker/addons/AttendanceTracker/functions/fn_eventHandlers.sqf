@@ -15,15 +15,16 @@
 		};
 
 		(AttendanceTracker getVariable ["allUsers", createHashMap]) set [_networkId, _userInfo];
-		(AttendanceTracker getVariable ["rowIds", createHashMap]) set [_networkId, [nil, nil]]; // reset rowId on connect
+
 		[
 			"Server",
 			_playerID,
 			_playerUID,
 			_profileName,
 			_steamName,
-			nil // send rowId on d/c only
-		] call attendanceTracker_fnc_logServerEvent;
+			nil,
+			nil
+		] call attendanceTracker_fnc_writeConnect;
 
 	}],
 	["OnUserDisconnected", {
@@ -45,19 +46,13 @@
 			[format ["(EventHandler) OnUserDisconnected: %1 is HC, skipping", _playerID], "DEBUG"] call attendanceTracker_fnc_log;
 		};
 
-		private _rowId = ((AttendanceTracker getVariable ["rowIds", createHashMap]) getOrDefault [
-			_networkId,
-			[nil, nil]
-		]) select 0;
-
 		[
 			"Server",
 			_playerID,
 			_playerUID,
 			_profileName,
-			_steamName,
-			(if (!isNil "_rowId") then {_rowId} else {nil}) // send rowId on d/c only
-		] call attendanceTracker_fnc_logServerEvent;
+			_steamName
+		] call attendanceTracker_fnc_writeDisconnect;
 	}],
 	["PlayerConnected", {
 		params ["_id", "_uid", "_name", "_jip", "_owner", "_idstr"];
@@ -79,6 +74,7 @@
 		};
 
 		(AttendanceTracker getVariable ["allUsers", createHashMap]) set [_playerID, _userInfo];
+
 		[
 			"Mission",
 			_playerID,
@@ -86,9 +82,8 @@
 			_profileName,
 			_steamName,
 			_jip,
-			roleDescription _unit,
-			nil // send rowId on d/c only
-		] call attendanceTracker_fnc_logMissionEvent;
+			roleDescription _unit
+		] call attendanceTracker_fnc_writeConnect;
 	}],
 	["PlayerDisconnected", {
 		// NOTE: HandleDisconnect returns a DIFFERENT _id than PlayerDisconnected and above handlers, so we can't use it here
@@ -109,11 +104,6 @@
 		if (_isHC) exitWith {
 			[format ["(EventHandler) HandleDisconnect: %1 is HC, skipping", _playerID], "DEBUG"] call attendanceTracker_fnc_log;
 		};
-
-		private _rowId = ((AttendanceTracker getVariable ["rowIds", createHashMap]) getOrDefault [
-			_idstr,
-			[nil, nil]
-		]) select 1;
 		
 		[
 			"Mission",
@@ -122,10 +112,8 @@
 			_profileName,
 			_steamName,
 			_jip,
-			nil,
-			(if (!isNil "_rowId") then {_rowId} else {nil}) // send rowId on d/c only
-		] call attendanceTracker_fnc_logMissionEvent;
-		
+			nil
+		] call attendanceTracker_fnc_writeDisconnect;
 
 		false;
 	}],
@@ -149,32 +137,24 @@
 			[format ["(EventHandler) OnUserKicked: %1 is HC, skipping", _playerID], "DEBUG"] call attendanceTracker_fnc_log;
 		};
 
-		private _rowId = ((AttendanceTracker getVariable ["rowIds", createHashMap]) getOrDefault [
-			_networkId,
-			[nil, nil]
-		]) select 0;
-
 		[
 			"Server",
 			_playerID,
 			_playerUID,
 			_profileName,
 			_steamName,
-			(if (!isNil "_rowId") then {_rowId} else {nil}) // send rowId on d/c only
-		] call attendanceTracker_fnc_logServerEvent;
+			nil,
+			nil
+		] call attendanceTracker_fnc_writeDisconnect;
 
-
-		private _rowId = ((AttendanceTracker getVariable ["rowIds", createHashMap]) getOrDefault [
-			_networkId,
-			[nil, nil]
-		]) select 1;
 		[
 			"Mission",
 			_playerID,
 			_playerUID,
 			_profileName,
 			_steamName,
-			nil // send rowId on d/c only
-		] call attendanceTracker_fnc_logMissionEvent;
+			nil,
+			nil
+		] call attendanceTracker_fnc_writeDisconnect;
 	}]
 ];
