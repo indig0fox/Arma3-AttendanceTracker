@@ -50,19 +50,19 @@ addMissionEventHandler ["ExtensionCallback", {
 				// close any null disconnect values from previous mission
 				"AttendanceTracker" callExtension ["fillLastMissionNull", []];
 				
-				// log mission info and get back the row Id to send with future messages
-				private _response = "AttendanceTracker" callExtension [
-					"logMission",
-					[
-						[AttendanceTracker getVariable ["missionContext", createHashMap]] call CBA_fnc_encodeJSON
-					]
-				];
-
 				// log world info
 				private _response = "AttendanceTracker" callExtension [
 					"logWorld",
 					[
 						[(call attendanceTracker_fnc_getWorldInfo)] call CBA_fnc_encodeJSON
+					]
+				];
+				
+				// log mission info and get back the row Id to send with future messages
+				private _response = "AttendanceTracker" callExtension [
+					"logMission",
+					[
+						[AttendanceTracker getVariable ["missionContext", createHashMap]] call CBA_fnc_encodeJSON
 					]
 				];
 			};

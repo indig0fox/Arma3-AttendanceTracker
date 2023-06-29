@@ -194,7 +194,7 @@ func writeWorldInfo(worldInfo string) {
 	// write to database
 	// check if world exists
 	var worldID int
-	err = db.QueryRow("SELECT id FROM worlds WHERE workshop_id = ?", wi.WorkshopID).Scan(&worldID)
+	err = db.QueryRow("SELECT id FROM worlds WHERE world_name = ?", wi.WorldName).Scan(&worldID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// world does not exist, insert it
@@ -257,41 +257,67 @@ type MissionInfo struct {
 	ServerProfile     string `json:"serverProfile"`
 	MissionStart      string `json:"missionStart"`
 	MissionHash       string `json:"missionHash"`
+	WorldName         string `json:"worldName"`
 }
 
 func writeMissionInfo(missionInfo string) {
 	functionName := "writeMissionInfo"
+	var err error
 	// writeLog(functionName, fmt.Sprintf(`["%s", "DEBUG"]`, missionInfo))
 	// missionInfo is json, parse it
 	var mi MissionInfo
 	fixedString := fixEscapeQuotes(trimQuotes(missionInfo))
-	err := json.Unmarshal([]byte(fixedString), &mi)
+	err = json.Unmarshal([]byte(fixedString), &mi)
 	if err != nil {
 		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 		return
 	}
 
-	// get MySQL friendly datetime
-
-	// write to log as json
-	// writeLog(functionName, fmt.Sprintf(`["%s", "DEBUG"]`, mi))
-
-	// write to database
-	// every mission is unique, so insert it
-	stmt, err := db.Prepare(fmt.Sprintf(
-		"INSERT INTO %s (mission_name, briefing_name, mission_name_source, on_load_name, author, server_name, server_profile, mission_start, mission_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		MISSIONS_TABLE,
-	))
+	// check if mission exists based on hash
+	var worldID int
+	err = db.QueryRow("SELECT id FROM worlds WHERE world_name = ?", mi.WorldName).Scan(&worldID)
 	if err != nil {
 		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 		return
 	}
-	defer stmt.Close()
-	res, err := stmt.Exec(mi.MissionName, mi.BriefingName, mi.MissionNameSource, mi.OnLoadName, mi.Author, mi.ServerName, mi.ServerProfile, mi.MissionStart, mi.MissionHash)
+
+	var stmt *sql.Stmt
+	var res sql.Result
+
+	if worldID != 0 {
+		sqlWorld := fmt.Sprintf(
+			"INSERT INTO %s (mission_name, briefing_name, mission_name_source, on_load_name, author, server_name, server_profile, mission_start, mission_hash, world_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			MISSIONS_TABLE,
+		)
+		stmt, err = db.Prepare(sqlWorld)
+		if err != nil {
+			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+			return
+		}
+		defer stmt.Close()
+
+		res, err = stmt.Exec(mi.MissionName, mi.BriefingName, mi.MissionNameSource, mi.OnLoadName, mi.Author, mi.ServerName, mi.ServerProfile, mi.MissionStart, mi.MissionHash, worldID)
+
+	} else {
+		// if no world was found, write without it
+		sqlNoWorld := fmt.Sprintf(
+			"INSERT INTO %s (mission_name, briefing_name, mission_name_source, on_load_name, author, server_name, server_profile, mission_start, mission_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			MISSIONS_TABLE,
+		)
+		stmt, err = db.Prepare(sqlNoWorld)
+		if err != nil {
+			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+			return
+		}
+		defer stmt.Close()
+		res, err = stmt.Exec(mi.MissionName, mi.BriefingName, mi.MissionNameSource, mi.OnLoadName, mi.Author, mi.ServerName, mi.ServerProfile, mi.MissionStart, mi.MissionHash)
+	}
+
 	if err != nil {
 		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 		return
 	}
+
 	lastID, err := res.LastInsertId()
 	if err != nil {
 		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))

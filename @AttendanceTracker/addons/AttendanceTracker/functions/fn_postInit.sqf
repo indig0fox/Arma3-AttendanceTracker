@@ -15,7 +15,8 @@ AttendanceTracker setVariable ["missionContext", createHashMapFromArray [
 	["serverName", serverName],
 	["serverProfile", profileName],
 	["missionStart", AttendanceTracker_missionStartTimestamp],
-	["missionHash", AttendanceTracker_missionHash]
+	["missionHash", AttendanceTracker_missionHash],
+	["worldName", toLower worldName]
 ]];
 
 
