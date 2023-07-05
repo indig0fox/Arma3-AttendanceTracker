@@ -1,4 +1,4 @@
-# 17th-attendanceTracker
+# Arma 3 Attendance Tracker
 
 ## Setup
 
@@ -71,13 +71,32 @@ Finally, copy `config.example.json` to `config.json` and update it with your dat
 
 ### Show missions with attendance
 
-This will retrieve a view showing all missions with attendance data, sorted by the most recent mission joins first.
+This will retrieve a view showing all missions with attendance data, sorted by the most recent mission joins first. Mission events without a mission disconnect_time (due to server crash or in-progress mission) will be ignored.
 
 ```sql
-select a.server_profile as Server, a.briefing_name as "Mission Name", a.mission_start as "Start Time", b.display_name as "World", c.profile_name as "Player Name", c.player_uid as "Player UID", TIMESTAMPDIFF(MINUTE, c.join_time, c.disconnect_time) as "Play Time (m)", c.join_time as "Join Time", c.disconnect_time as "Leave Time"
+select
+    a.server_profile as Server,
+    a.briefing_name as "Mission Name",
+    a.mission_start as "Start Time",
+    b.display_name as "World",
+    c.profile_name as "Player Name",
+    c.player_uid as "Player UID",
+    TIMESTAMPDIFF(
+        MINUTE,
+        c.join_time,
+        c.disconnect_time
+    ) as "Play Time (m)",
+    c.join_time as "Join Time",
+    c.disconnect_time as "Leave Time"
 from missions a
-LEFT JOIN worlds b ON a.world_id = b.id
-LEFT JOIN attendance c ON a.mission_hash = c.mission_hash
-where c.event_type = 'Mission' AND TIMESTAMPDIFF(MINUTE, c.join_time, c.disconnect_time) > 0
-order by c.join_time desc;
+    LEFT JOIN worlds b ON a.world_id = b.id
+    LEFT JOIN attendance c ON a.mission_hash = c.mission_hash
+where
+    c.event_type = 'Mission'
+    AND c.disconnect_time IS NOT NULL
+    AND TIMESTAMPDIFF(
+        MINUTE,
+        c.join_time,
+        c.disconnect_time
+    ) > 0
 ```
