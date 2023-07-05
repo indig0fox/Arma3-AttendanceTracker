@@ -4,71 +4,80 @@
 
 **You will need a running MySQL or MariaDB instance.**
 
-Create a database with a name of your choosing. Then, run the following SQL command against it to create a table.
+The following SQL commands will set up the necessary tables for the application. You can run them from the MySQL command line or from a tool like phpMyAdmin.
+
+*In future, an ORM will be used to set this up automatically.*
 
 ```sql
--- a3server.attendancelog definition
+CREATE DATABASE `arma3_attendance` /*!40100 DEFAULT CHARACTER SET utf8mb3 */;
 
-CREATE TABLE `attendance` (
- `id` INT(11) NOT NULL AUTO_INCREMENT,
- `join_time` DATETIME NULL DEFAULT NULL,
- `disconnect_time` DATETIME NULL DEFAULT NULL,
- `mission_hash` VARCHAR(100) NULL DEFAULT '' COLLATE 'utf8mb3_general_ci',
- `event_type` VARCHAR(100) NOT NULL COLLATE 'utf8mb3_general_ci',
- `player_id` VARCHAR(30) NOT NULL COLLATE 'utf8mb3_general_ci',
- `player_uid` VARCHAR(100) NOT NULL COLLATE 'utf8mb3_general_ci',
- `profile_name` VARCHAR(100) NOT NULL COLLATE 'utf8mb3_general_ci',
- `steam_name` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
- `is_jip` TINYINT(4) NULL DEFAULT NULL,
- `role_description` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
- PRIMARY KEY (`id`) USING BTREE
-)
-COLLATE='utf8mb3_general_ci'
-ENGINE=InnoDB
-AUTO_INCREMENT=5868
-;
+USE `arma3_attendance`;
 
-
--- a3server.`missions` definition
-
+-- a3server.missions definition
 CREATE TABLE `missions` (
- `id` INT(11) NOT NULL AUTO_INCREMENT,
- `mission_name` VARCHAR(100) NOT NULL COLLATE 'utf8mb3_general_ci',
- `mission_name_source` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
- `briefing_name` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
- `on_load_name` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
- `author` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
- `server_name` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
- `server_profile` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
- `mission_start` DATETIME NULL DEFAULT NULL,
- `mission_hash` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
- PRIMARY KEY (`id`) USING BTREE
-)
-COLLATE='utf8mb3_general_ci'
-ENGINE=InnoDB
-;
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `world_id` int(11) DEFAULT NULL,
+  `mission_hash` varchar(100) NOT NULL DEFAULT '',
+  `mission_name` varchar(100) NOT NULL,
+  `mission_name_source` varchar(100) DEFAULT NULL,
+  `briefing_name` varchar(100) DEFAULT NULL,
+  `on_load_name` varchar(100) DEFAULT NULL,
+  `author` varchar(100) DEFAULT NULL,
+  `server_name` varchar(100) DEFAULT NULL,
+  `server_profile` varchar(100) DEFAULT NULL,
+  `mission_start` datetime DEFAULT NULL COMMENT 'In UTC',
+  PRIMARY KEY (`id`),
+  KEY `mission_hash` (`mission_hash`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb3;
+
+-- arma3_attendance.attendance definition
+CREATE TABLE `attendance` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `join_time` datetime DEFAULT NULL COMMENT 'Stored in UTC',
+  `disconnect_time` datetime DEFAULT NULL COMMENT 'Stored in UTC',
+  `mission_hash` varchar(100) DEFAULT NULL,
+  `event_type` varchar(100) NOT NULL,
+  `player_id` varchar(30) NOT NULL,
+  `player_uid` varchar(100) NOT NULL,
+  `profile_name` varchar(100) NOT NULL,
+  `steam_name` varchar(100) DEFAULT NULL,
+  `is_jip` tinyint(4) DEFAULT NULL,
+  `role_description` varchar(100) DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `mission_hash` (`mission_hash`),
+  CONSTRAINT `attendance_ibfk_1` FOREIGN KEY (`mission_hash`) REFERENCES `missions` (`mission_hash`) ON UPDATE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb3;
 
 
-
--- a3server.`worlds` definition
-
+-- a3server.worlds definition
 CREATE TABLE `worlds` (
- `id` INT(11) NOT NULL AUTO_INCREMENT,
- `author` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
- `display_name` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
- `world_name` VARCHAR(100) NOT NULL COLLATE 'utf8mb3_general_ci',
- `world_name_original` VARCHAR(100) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
- `world_size` INT(11) NULL DEFAULT NULL,
- `latitude` FLOAT NULL DEFAULT NULL,
- `longitude` FLOAT NULL DEFAULT NULL,
- `workshop_id` VARCHAR(50) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
- PRIMARY KEY (`id`) USING BTREE
-)
-COLLATE='utf8mb3_general_ci'
-ENGINE=InnoDB
-AUTO_INCREMENT=2
-;
-
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `author` varchar(100) DEFAULT NULL,
+  `display_name` varchar(100) DEFAULT NULL,
+  `world_name` varchar(100) NOT NULL,
+  `world_name_original` varchar(100) DEFAULT NULL,
+  `world_size` int(11) DEFAULT NULL,
+  `latitude` float DEFAULT NULL,
+  `longitude` float DEFAULT NULL,
+  `workshop_id` varchar(50) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `world_name` (`world_name`)
+) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb3;
 ```
 
-Finally, copy `config.example.json` to `config.json` and update it with your database credentials.
+Finally, copy `config.example.json` to `config.json` and update it with your database credentials and path.
+
+## QUERIES
+
+### Show missions with attendance
+
+This will retrieve a view showing all missions with attendance data, sorted by the most recent mission joins first.
+
+```sql
+select a.server_profile as Server, a.briefing_name as "Mission Name", a.mission_start as "Start Time", b.display_name as "World", c.profile_name as "Player Name", c.player_uid as "Player UID", TIMESTAMPDIFF(MINUTE, c.join_time, c.disconnect_time) as "Play Time (m)", c.join_time as "Join Time", c.disconnect_time as "Leave Time"
+from missions a
+LEFT JOIN worlds b ON a.world_id = b.id
+LEFT JOIN attendance c ON a.mission_hash = c.mission_hash
+where c.event_type = 'Mission' AND TIMESTAMPDIFF(MINUTE, c.join_time, c.disconnect_time) > 0
+order by c.join_time desc;
+```

@@ -3,5 +3,5 @@
   "mysqlPort": 3306,
   "mysqlUser": "root",
   "mysqlPassword": "root",
-  "mysqlDatabase": "db"
+  "mysqlDatabase": "arma3_attendance"
 }
