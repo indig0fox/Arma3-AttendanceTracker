@@ -12,11 +12,13 @@ import (
 	"crypto/md5"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"path"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 	"unsafe"
@@ -33,6 +35,7 @@ var extensionCallbackFnc C.extensionCallback
 var ADDON_FOLDER string = getDir() + "\\@AttendanceTracker"
 var LOG_FILE string = ADDON_FOLDER + "\\attendanceTracker.log"
 var CONFIG_FILE string = ADDON_FOLDER + "\\config.json"
+var SERVER_TIME_FILE string = ADDON_FOLDER + "\\lastServerTime.txt"
 
 var ATTENDANCE_TABLE string = "attendance"
 var MISSIONS_TABLE string = "missions"
@@ -47,8 +50,10 @@ var ATConfig ATSQLConfig
 var A3Config ArmaConfig
 
 type ArmaConfig struct {
-	DBUpdateIntervalSeconds int  `json:"dbUpdateIntervalSeconds"`
-	Debug                   bool `json:"debug"`
+	DBUpdateIntervalSeconds     int  `json:"dbUpdateIntervalSeconds"`
+	Debug                       bool `json:"debug"`
+	ServerEventFillNullMinutes  int  `json:"serverEventFillNullMinutes"`
+	MissionEventFillNullMinutes int  `json:"missionEventFillNullMinutes"`
 }
 
 type ATSQLConfig struct {
@@ -159,7 +164,7 @@ func getMissionHash() string {
 	functionName := "getMissionHash"
 	// get md5 hash of string
 	// https://stackoverflow.com/questions/2377881/how-to-get-a-md5-hash-from-a-string-in-golang
-	hash := md5.Sum([]byte(time.Now().UTC().Format("2006-01-02 15:04:05")))
+	hash := md5.Sum([]byte(time.Now().Format("2006-01-02 15:04:05")))
 
 	// convert to string
 	hashString := fmt.Sprintf(`%x`, hash)
@@ -169,26 +174,82 @@ func getMissionHash() string {
 
 func updateServerTime(serverTime uint64) {
 	functionName := "updateServerTime"
+
+	var err error
+
+	// check .txt file for server time
+	// first, check if it exists
+	if _, err := os.Stat(SERVER_TIME_FILE); os.IsNotExist(err) {
+		// file does not exist, create it and write serverTime to it
+		writeLog(functionName, `["Server time file does not exist, creating it", "DEBUG"]`)
+		err = ioutil.WriteFile(SERVER_TIME_FILE, []byte(strconv.FormatUint(serverTime, 10)), 0666)
+		if err != nil {
+			writeLog(functionName, fmt.Sprintf(`["Error writing server time to file: %v", "ERROR"]`, err))
+		}
+		return
+	}
+
+	// file exists, read it
+	line, err := ioutil.ReadFile(SERVER_TIME_FILE)
+	if err != nil {
+		writeLog(functionName, fmt.Sprintf(`["Error reading server time file: %v", "ERROR"]`, err))
+		return
+	}
+
+	// convert to uint64
+	LAST_SERVER_TIME, err := strconv.ParseUint(string(line), 10, 64)
+	if err != nil {
+		writeLog(functionName, fmt.Sprintf(`["Error converting server time to uint64: %v", "ERROR"]`, err))
+		return
+	}
+
 	// if serverTime is less than last server time, close server events
 	if serverTime < LAST_SERVER_TIME {
-		writeLog(functionName, `["Server has restarted, closing pending server sessions in attendance", "INFO"]`)
 		closeServerEvents()
 	}
 	LAST_SERVER_TIME = serverTime
 
+	// write server time to file
+	err = ioutil.WriteFile(SERVER_TIME_FILE, []byte(strconv.FormatUint(serverTime, 10)), 0666)
+	if err != nil {
+		writeLog(functionName, fmt.Sprintf(`["Error writing server time to file: %v", "ERROR"]`, err))
+		return
+	}
 }
 
 func closeServerEvents() {
 	functionName := "closeServerEvents"
-	writeLog(functionName, `["Closing server events", "INFO"]`)
-	// get all server events with null DisconnectTime & set DisconnectTime to current time
-	op := db.Model(&AttendanceItem{}).Where(`event_type = ? AND disconnect_time IS NULL`).Update("disconnect_time", time.Now().UTC())
-	if op.Error != nil {
-		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, op.Error))
-		return
+	writeLog(functionName, `["Filling missing disconnect events due to server restart.", "DEBUG"]`)
+	// get all events with null DisconnectTime & set DisconnectTime to current time
+	var events []AttendanceItem
+	db.Where("disconnect_time = '0000-00-00 00:00:00'").Find(&events)
+	for _, event := range events {
+
+		// if difference between JoinTime and current time is greater than threshold, set to threshold
+		if event.EventType == "Server" {
+			var timeThreshold time.Time = event.JoinTime.Add(-time.Duration(A3Config.ServerEventFillNullMinutes) * time.Minute)
+			if event.JoinTime.Before(timeThreshold) {
+				event.DisconnectTime = timeThreshold
+			} else {
+				event.DisconnectTime = time.Now()
+			}
+		} else if event.EventType == "Mission" {
+			var timeThreshold time.Time = event.JoinTime.Add(-time.Duration(A3Config.MissionEventFillNullMinutes) * time.Minute)
+			if event.JoinTime.Before(timeThreshold) {
+				event.DisconnectTime = timeThreshold
+			} else {
+				event.DisconnectTime = time.Now()
+			}
+		}
+		db.Save(&event)
+		if db.Error != nil {
+			writeLog(functionName, fmt.Sprintf(`["Error filling missing disconnects: %v", "ERROR"]`, db.Error))
+			return
+		}
 	}
+
 	// log how many
-	writeLog(functionName, fmt.Sprintf(`["%d server events closed", "INFO"]`, op.RowsAffected))
+	writeLog(functionName, fmt.Sprintf(`["%d missing disconnects filled.", "INFO"]`, len(events)))
 }
 
 func connectDB() error {
@@ -199,7 +260,7 @@ func connectDB() error {
 	// connect to database
 	var err error
 	dsn := fmt.Sprintf(
-		"%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+		"%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True",
 		ATConfig.MySQLUser,
 		ATConfig.MySQLPassword,
 		ATConfig.MySQLHost,
@@ -271,6 +332,7 @@ func writeWorldInfo(worldInfo string) {
 
 	// write world if not exist
 	var world World
+	var returnId uint
 	db.Where("world_name = ?", wi.WorldName).First(&world)
 	if world.ID == 0 {
 		writeLog(functionName, `["World not found, writing new world", "INFO"]`)
@@ -280,24 +342,28 @@ func writeWorldInfo(worldInfo string) {
 			return
 		}
 		writeLog(functionName, fmt.Sprintf(`["World written with ID %d", "INFO"]`, wi.ID))
+		returnId = wi.ID
 	} else {
 		// return ID
 		writeLog(functionName, fmt.Sprintf(`["World exists with ID %d", "INFO"]`, world.ID))
+		returnId = world.ID
 	}
+
+	writeLog(functionName, fmt.Sprintf(`["WORLD_ID", %d]`, returnId))
 }
 
 type Mission struct {
 	gorm.Model
-	MissionName       string `json:"missionName"`
-	BriefingName      string `json:"briefingName"`
-	MissionNameSource string `json:"missionNameSource"`
-	OnLoadName        string `json:"onLoadName"`
-	Author            string `json:"author"`
-	ServerName        string `json:"serverName"`
-	ServerProfile     string `json:"serverProfile"`
-	MissionStart      string `json:"missionStart"`
-	MissionHash       string `json:"missionHash"`
-	WorldName         string `json:"worldName" gorm:"-"`
+	MissionName       string    `json:"missionName"`
+	BriefingName      string    `json:"briefingName"`
+	MissionNameSource string    `json:"missionNameSource"`
+	OnLoadName        string    `json:"onLoadName"`
+	Author            string    `json:"author"`
+	ServerName        string    `json:"serverName"`
+	ServerProfile     string    `json:"serverProfile"`
+	MissionStart      time.Time `json:"missionStart" gorm:"type:datetime"`
+	MissionHash       string    `json:"missionHash"`
+	WorldName         string    `json:"worldName" gorm:"-"`
 	WorldID           uint
 	World             World `gorm:"foreignkey:WorldID"`
 	Attendees         []AttendanceItem
@@ -384,22 +450,16 @@ func writeDisconnectEvent(data string) {
 	var attendanceRows []AttendanceItem
 	db.Where("player_uid = ? AND event_type = ? AND disconnect_time = '0000-00-00 00:00:00'", event.PlayerUID, event.EventType).Find(&attendanceRows)
 	for _, row := range attendanceRows {
-		// put to json
-		json, err := json.Marshal(row)
-		if err != nil {
-			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
-			return
-		}
-		writeLog(functionName, fmt.Sprintf(`["Updating disconnect time for %s", "INFO"]`, json))
-		if row.JoinTime.Before(time.Now().UTC().Add(-1*time.Hour)) && row.EventType == "Mission" {
+		// update disconnect time
+		if row.JoinTime.Before(time.Now().Add(-1*time.Hour)) && row.EventType == "Mission" {
 			// if mission JoinTime is more than 1 hour ago, simplify this to write DisconnectTime as 1 hour from JoinTime. this to account for crashes where people don't immediately rejoin
-			row.DisconnectTime = time.Now().UTC().Add(-1 * time.Hour)
-		} else if row.JoinTime.Before(time.Now().UTC().Add(-6*time.Hour)) && row.EventType == "Server" {
+			row.DisconnectTime = row.JoinTime.Add(-1 * time.Hour)
+		} else if row.JoinTime.Before(time.Now().Add(-6*time.Hour)) && row.EventType == "Server" {
 			// if server JoinTime is more than 6 hours ago, simplify this to write DisconnectTime as 6 hours from JoinTime. this to account for server crashes where people don't immediately rejoin without overwriting valid (potentially lengthy) server sessions
-			row.DisconnectTime = time.Now().UTC().Add(-6 * time.Hour)
+			row.DisconnectTime = row.JoinTime.Add(-6 * time.Hour)
 		} else {
 			// otherwise, update DisconnectTime to now
-			row.DisconnectTime = time.Now().UTC()
+			row.DisconnectTime = time.Now()
 		}
 		db.Save(&row)
 	}
@@ -445,7 +505,7 @@ func writeAttendance(data string) {
 
 		} else {
 			// insert new row
-			event.JoinTime = time.Now().UTC()
+			event.JoinTime = time.Now()
 			row := db.Create(&event)
 			if row.Error != nil {
 				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, row.Error))
@@ -469,14 +529,14 @@ func writeAttendance(data string) {
 		db.Where("player_id = ? AND player_uid = ? AND event_type = ? AND mission_hash = ?", event.PlayerId, event.PlayerUID, event.EventType, event.MissionHash).Order("join_time desc").First(&attendance)
 		if attendance.ID != 0 {
 			// update disconnect time
-			row := db.Model(&attendance).Update("disconnect_time", time.Now().UTC())
+			row := db.Model(&attendance).Update("disconnect_time", time.Now())
 			if row.Error != nil {
 				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, row.Error))
 				return
 			}
 			rowId, playerUid = attendance.ID, attendance.PlayerUID
 		} else {
-			event.JoinTime = time.Now().UTC()
+			event.JoinTime = time.Now()
 			// insert new row
 			row := db.Create(&event)
 			if row.Error != nil {
@@ -532,11 +592,22 @@ func goRVExtensionArgs(output *C.char, outputsize C.size_t, input *C.char, argv 
 		}
 	case "logMission":
 		if argc == 1 {
-			writeMission(out[0])
+			go writeMission(out[0])
 		}
 	case "logWorld":
 		if argc == 1 {
-			writeWorldInfo(out[0])
+			go writeWorldInfo(out[0])
+		}
+	case "updateServerTime":
+		if argc == 1 {
+			// convert to uint64
+			serverTime, err := strconv.ParseUint(out[0], 10, 64)
+			if err != nil {
+				writeLog("updateServerTime", fmt.Sprintf(`["%s", "ERROR"]`, err))
+				temp = "ERROR parsing server time"
+			} else {
+				go updateServerTime(serverTime)
+			}
 		}
 	}
 
@@ -568,7 +639,7 @@ func callBackExample() {
 func getTimestamp() string {
 	// get the current unix timestamp in nanoseconds
 	// return time.Now().Local().Unix()
-	return time.Now().UTC().Format("2006-01-02 15:04:05")
+	return time.Now().Format("2006-01-02 15:04:05")
 }
 
 func trimQuotes(s string) string {

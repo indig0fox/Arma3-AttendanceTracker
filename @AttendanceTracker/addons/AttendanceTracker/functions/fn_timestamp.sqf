@@ -13,7 +13,7 @@ systemTimeUTC apply {if (_x < 10) then {"0" + str _x} else {str _x}} params [
 ];
 
 format[
-	"%1-%2-%3 %4:%5:%6",
+	"%1-%2-%3T%4:%5:%6.000Z",
 	_year,
 	_month,
 	_day,

@@ -8,6 +8,8 @@
   },
   "armaConfig": {
     "dbUpdateIntervalSeconds": 90,
+    "serverEventFillNullMinutes": 90,
+    "missionEventFillNullMinutes": 15,
     "debug": false
   }
 }

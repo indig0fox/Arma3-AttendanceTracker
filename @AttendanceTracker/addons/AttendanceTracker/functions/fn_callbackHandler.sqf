@@ -55,6 +55,15 @@ addMissionEventHandler ["ExtensionCallback", {
 					]
 				];
 				
+				missionNamespace setVariable ["AttendanceTracker_DBConnected", true];
+			};
+		};
+		case "writeWorldInfo": {
+			if (_response#0 == "WORLD_ID") then {
+				AttendanceTracker_worldId = _response#1;
+
+				// world info written. mission info depends on that, so now we'll write it
+
 				// log mission info and get back the row Id to send with future messages
 				private _response = "AttendanceTracker" callExtension [
 					"logMission",
@@ -62,12 +71,11 @@ addMissionEventHandler ["ExtensionCallback", {
 						[AttendanceTracker getVariable ["missionContext", createHashMap]] call CBA_fnc_encodeJSON
 					]
 				];
-
-				missionNamespace setVariable ["AttendanceTracker_DBConnected", true];
 			};
 		};
 		case "writeMission": {
 			if (_response#0 == "MISSION_ID") then {
+				// mission has written so lets finish out init and set missionId for the returned PK, activating the ability for attendance records to send.
 				AttendanceTracker_missionId = _response#1;
 			};
 		};

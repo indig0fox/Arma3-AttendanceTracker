@@ -40,6 +40,19 @@ AttendanceTracker setVariable ["missionContext", createHashMapFromArray [
 AttendanceTracker setVariable ["allUsers", createHashMap];
 AttendanceTracker setVariable ["rowIds", createHashMap];
 
+// update the extension with the current server time to identify restarts
+[
+	{
+		'AttendanceTracker' callExtension [
+			"updateServerTime",
+			[
+				round(diag_tickTime)
+			]
+		]
+	},
+	30
+] call CBA_fnc_addPerFrameHandler;
+
 {
 	if (!isServer) exitWith {};
 	_x params ["_ehName", "_code"];
