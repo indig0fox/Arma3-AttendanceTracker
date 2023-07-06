@@ -6,7 +6,22 @@ diag_log format ["AttendanceTracker: Mission started at %1", AttendanceTracker_m
 AttendanceTracker_missionHash = call attendanceTracker_fnc_getMissionHash;
 diag_log format ["AttendanceTracker: Mission hash is %1", AttendanceTracker_missionHash];
 
+_settings = call attendanceTracker_fnc_getSettings;
+if (count _settings > 0) then {
+	for "_i" from 0 to (count _settings) - 1 do {
+		_setting = _settings select _i;
+		_key = _setting select 0;
+		_value = _setting select 1;
+		missionNamespace setVariable ["AttendanceTracker_" + _key, _value];
+	};
+} else {
+	[format["Failed to parse settings: %1", _settings], "ERROR"] call attendanceTracker_fnc_log;
+};
+call attendanceTracker_fnc_connectDB;
+
 AttendanceTracker setVariable ["missionContext", createHashMapFromArray [
+	["missionHash", AttendanceTracker_missionHash],
+	["missionStart", AttendanceTracker_missionStartTimestamp],
 	["missionName", missionName],
 	["briefingName", briefingName],
 	["missionNameSource", missionNameSource],
@@ -24,9 +39,6 @@ AttendanceTracker setVariable ["missionContext", createHashMapFromArray [
 // store all user details in a hash when they connect so we can reference it in disconnect events
 AttendanceTracker setVariable ["allUsers", createHashMap];
 AttendanceTracker setVariable ["rowIds", createHashMap];
-missionNamespace setVariable ["AttendanceTracker_debug", false];
-
-call attendanceTracker_fnc_connectDB;
 
 {
 	if (!isServer) exitWith {};

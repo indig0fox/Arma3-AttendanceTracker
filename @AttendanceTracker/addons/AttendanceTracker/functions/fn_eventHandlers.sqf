@@ -16,16 +16,52 @@
 
 		(AttendanceTracker getVariable ["allUsers", createHashMap]) set [_networkId, _userInfo];
 
-		[
+
+		[ // write d/c for past events
 			"Server",
 			_playerID,
 			_playerUID,
 			_profileName,
-			_steamName,
-			nil,
-			nil
-		] call attendanceTracker_fnc_writeConnect;
+			_steamName
+		] call attendanceTracker_fnc_writeDisconnect;
 
+		// [
+		// 	"Server",
+		// 	_playerID,
+		// 	_playerUID,
+		// 	_profileName,
+		// 	_steamName,
+		// 	nil,
+		// 	nil
+		// ] call attendanceTracker_fnc_writeConnect;
+
+		// start CBA PFH
+		[format ["(EventHandler) OnUserConnected: Starting CBA PFH for %1", _playerID], "DEBUG"] call attendanceTracker_fnc_log;
+		[
+			{
+				params ["_args", "_handle"];
+				// check if player is still connected
+				private _playerID = _args select 1;
+				private _playerUID = _args select 2;
+				if (allUsers find _playerID == -1) exitWith {
+					[format ["(EventHandler) OnUserConnected: %1 (UID %2) is no longer connected, exiting CBA PFH", _playerUID], "DEBUG"] call attendanceTracker_fnc_log;
+					_args call attendanceTracker_fnc_writeDisconnect;
+					[_handle] call CBA_fnc_removePerFrameHandler;
+				};
+
+				_args call attendanceTracker_fnc_writeConnect;
+			},
+			missionNamespace getVariable ["AttendanceTracker_" + "dbupdateintervalseconds", 300],
+			[
+				"Server",
+				_playerID,
+				_playerUID,
+				_profileName,
+				_steamName,
+				nil,
+				nil
+			]
+		] call CBA_fnc_addPerFrameHandler;
 	}],
 	["OnUserDisconnected", {
 		params ["_networkId", "_clientStateNumber", "_clientState"];
@@ -75,15 +111,56 @@
 
 		(AttendanceTracker getVariable ["allUsers", createHashMap]) set [_playerID, _userInfo];
 
-		[
+
+		[ // write d/c for past events
 			"Mission",
 			_playerID,
 			_playerUID,
 			_profileName,
 			_steamName,
 			_jip,
-			roleDescription _unit
-		] call attendanceTracker_fnc_writeConnect;
+			nil
+		] call attendanceTracker_fnc_writeDisconnect;
+
+		// [
+		// 	"Mission",
+		// 	_playerID,
+		// 	_playerUID,
+		// 	_profileName,
+		// 	_steamName,
+		// 	_jip,
+		// 	roleDescription _unit
+		// ] call attendanceTracker_fnc_writeConnect;
+
+		// start CBA PFH
+		[format ["(EventHandler) PlayerConnected: Starting CBA PFH for %1", _playerID], "DEBUG"] call attendanceTracker_fnc_log;
+		[
+			{
+				params ["_args", "_handle"];
+				// check if player is still connected
+				private _playerID = _args select 1;
+				private _playerUID = _args select 2;
+				private _userInfo = getUserInfo _playerID;
+				private _clientStateNumber = _userInfo select 6;
+				if (_clientStateNumber < 6) exitWith {
+					[format ["(EventHandler) PlayerConnected: %1 (UID) is no longer connected to the mission, exiting CBA PFH", _playerID], "DEBUG"] call attendanceTracker_fnc_log;
+					_args call attendanceTracker_fnc_writeDisconnect;
+					[_handle] call CBA_fnc_removePerFrameHandler;
+				};
+
+				_args call attendanceTracker_fnc_writeConnect;
+			},
+			missionNamespace getVariable ["AttendanceTracker_" + "dbupdateintervalseconds", 300],
+			[
+				"Mission",
+				_playerID,
+				_playerUID,
+				_profileName,
+				_steamName,
+				_jip,
+				roleDescription _unit
+			]
+		] call CBA_fnc_addPerFrameHandler;
 	}],
 	["PlayerDisconnected", {
 		// NOTE: HandleDisconnect returns a DIFFERENT _id than PlayerDisconnected and above handlers, so we can't use it here

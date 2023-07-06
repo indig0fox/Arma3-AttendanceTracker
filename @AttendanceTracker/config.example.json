@@ -1,7 +1,13 @@
 {
-  "mysqlHost": "127.0.0.1",
-  "mysqlPort": 3306,
-  "mysqlUser": "root",
-  "mysqlPassword": "root",
-  "mysqlDatabase": "arma3_attendance"
+  "sqlConfig": {
+    "mysqlHost": "127.0.0.1",
+    "mysqlPort": 3306,
+    "mysqlUser": "root",
+    "mysqlPassword": "root",
+    "mysqlDatabase": "arma3_attendance"
+  },
+  "armaConfig": {
+    "dbUpdateIntervalSeconds": 90,
+    "debug": false
+  }
 }

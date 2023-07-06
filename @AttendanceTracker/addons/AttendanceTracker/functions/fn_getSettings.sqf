@@ -1,0 +1,1 @@
+parseSimpleArray ('AttendanceTracker' callExtension "getSettings");

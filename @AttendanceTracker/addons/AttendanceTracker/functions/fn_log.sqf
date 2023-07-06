@@ -7,7 +7,7 @@ params [
 if (isNil "_message") exitWith {false};
 if (
 	missionNamespace getVariable ["AttendanceTracker_debug", false] &&
-	_level == "DEBUG"
+	_level != "WARN" && _level != "ERROR"
 ) exitWith {};
 
 "AttendanceTracker" callExtension ["log", [_level, _message]];
