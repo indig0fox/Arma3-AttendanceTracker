@@ -174,3 +174,39 @@ where
         c.disconnect_time
     ) > 0
 ```
+
+---
+
+## Contributing
+
+Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+
+---
+
+## Development
+
+### Prerequisites
+
+- [Go 1.16.4](https://golang.org/doc/install)
+- [MinGW-w64](https://sourceforge.net/projects/mingw-w64/) (Windows only)
+- [GCC](https://gcc.gnu.org/) (Linux only)
+
+### Building
+
+```bash
+cd ./extension
+$ENV:GOARCH = "amd64"
+$ENV:CGO_ENABLED = 1
+go1.16.4 build -o ../@AttendanceTracker/AttendanceTracker_x64.dll -buildmode=c-shared .
+```
+
+To prepare the addon, you'll need some PBO manager utility to pack this folder:
+[`@AttendanceTracker/addons/AttendanceTracker`](@AttendanceTracker/addons/AttendanceTracker)
+
+---
+
+## Credits
+
+- [Go](https://golang.org/)
+- [Go Arma 3 Extension Template](https://github.com/code34/armago_x64/tree/master)
+- [GORM](https://gorm.io/)
