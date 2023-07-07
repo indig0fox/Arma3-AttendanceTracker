@@ -76,7 +76,7 @@ The extension will log ERROR and WARN events to the Arma 3 server's RPT file, wh
 "debug": false:
 The extension will log ERROR, WARN, INFO, and DEBUG events to the Arma 3 server's RPT file, which can be found in the server's profile folder.
 
-All events will be always be logged to `@AttendanceTracker/attendanceTracker.log` in log line format.
+All events will always be logged to `@AttendanceTracker/attendanceTracker.log` in log line format.
 
 ### Timezone
 
