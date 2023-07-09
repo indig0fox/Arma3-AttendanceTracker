@@ -123,6 +123,8 @@ func loadConfig() {
 	}
 	defer file.Close()
 
+	// log.Println("Loading config from", CONFIG_FILE)
+
 	decoder := json.NewDecoder(file)
 	err = decoder.Decode(&Config)
 	if err != nil {
@@ -131,6 +133,7 @@ func loadConfig() {
 	}
 	A3Config = Config.ArmaConfig
 	ATConfig = Config.SQLConfig
+
 	writeLog(functionName, `["Config loaded", "INFO"]`)
 }
 
@@ -222,23 +225,23 @@ func closeServerEvents() {
 	writeLog(functionName, `["Filling missing disconnect events due to server restart.", "DEBUG"]`)
 	// get all events with null DisconnectTime & set DisconnectTime to current time
 	var events []AttendanceItem
-	db.Where("disconnect_time = '0000-00-00 00:00:00'").Find(&events)
+	db.Where("disconnect_time_utc = '0000-00-00 00:00:00'").Find(&events)
 	for _, event := range events {
 
 		// if difference between JoinTime and current time is greater than threshold, set to threshold
 		if event.EventType == "Server" {
-			var timeThreshold time.Time = event.JoinTime.Add(-time.Duration(A3Config.ServerEventFillNullMinutes) * time.Minute)
-			if event.JoinTime.Before(timeThreshold) {
-				event.DisconnectTime = timeThreshold
+			var timeThreshold time.Time = event.JoinTimeUTC.Add(-time.Duration(A3Config.ServerEventFillNullMinutes) * time.Minute)
+			if event.JoinTimeUTC.Before(timeThreshold) {
+				event.DisconnectTimeUTC = timeThreshold
 			} else {
-				event.DisconnectTime = time.Now()
+				event.DisconnectTimeUTC = time.Now()
 			}
 		} else if event.EventType == "Mission" {
-			var timeThreshold time.Time = event.JoinTime.Add(-time.Duration(A3Config.MissionEventFillNullMinutes) * time.Minute)
-			if event.JoinTime.Before(timeThreshold) {
-				event.DisconnectTime = timeThreshold
+			var timeThreshold time.Time = event.JoinTimeUTC.Add(-time.Duration(A3Config.MissionEventFillNullMinutes) * time.Minute)
+			if event.JoinTimeUTC.Before(timeThreshold) {
+				event.DisconnectTimeUTC = timeThreshold
 			} else {
-				event.DisconnectTime = time.Now()
+				event.DisconnectTimeUTC = time.Now()
 			}
 		}
 		db.Save(&event)
@@ -270,6 +273,7 @@ func connectDB() error {
 
 	// log dsn and pause
 	// writeLog("connectDB", fmt.Sprintf(`["DSN: %s", "INFO"]`, dsn))
+	// fmt.Println(dsn)
 
 	if db != nil {
 		// log success and return
@@ -280,13 +284,15 @@ func connectDB() error {
 
 	db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
+		// log.Println(err)
 		writeLog("connectDB", fmt.Sprintf(`["%s", "ERROR"]`, err))
 		return err
 	}
 
 	// Migrate the schema
-	err = db.AutoMigrate(&World{}, &Mission{}, &AttendanceItem{})
+	err = db.Set("gorm:table_options", "ENGINE=InnoDB").AutoMigrate(&World{}, &Mission{}, &AttendanceItem{})
 	if err != nil {
+		// log.Println(err)
 		writeLog("connectDB", fmt.Sprintf(`["%s", "ERROR"]`, err))
 		return err
 	}
@@ -303,7 +309,7 @@ type World struct {
 	DisplayName       string  `json:"displayName"`
 	WorldName         string  `json:"worldName"`
 	WorldNameOriginal string  `json:"worldNameOriginal"`
-	WorldSize         int     `json:"worldSize"`
+	WorldSize         float32 `json:"worldSize"`
 	Latitude          float32 `json:"latitude"`
 	Longitude         float32 `json:"longitude"`
 	Missions          []Mission
@@ -362,7 +368,7 @@ type Mission struct {
 	ServerName        string    `json:"serverName"`
 	ServerProfile     string    `json:"serverProfile"`
 	MissionStart      time.Time `json:"missionStart" gorm:"type:datetime"`
-	MissionHash       string    `json:"missionHash"`
+	MissionHash       string    `json:"missionHash" gorm:"index"`
 	WorldName         string    `json:"worldName" gorm:"-"`
 	WorldID           uint
 	World             World `gorm:"foreignkey:WorldID"`
@@ -412,17 +418,18 @@ func writeMission(missionJSON string) {
 
 type AttendanceItem struct {
 	gorm.Model
-	MissionHash     string `json:"missionHash"`
-	EventType       string `json:"eventType"`
-	PlayerId        string `json:"playerId"`
-	PlayerUID       string `json:"playerUID"`
-	JoinTime        time.Time
-	DisconnectTime  time.Time
-	ProfileName     string `json:"profileName"`
-	SteamName       string `json:"steamName"`
-	IsJIP           bool   `json:"isJIP"`
-	RoleDescription string `json:"roleDescription"`
-	MissionID       int
+	MissionHash       string `json:"missionHash"`
+	EventType         string `json:"eventType"`
+	PlayerId          string `json:"playerId"`
+	PlayerUID         string `json:"playerUID"`
+	JoinTimeUTC       time.Time
+	DisconnectTimeUTC time.Time
+	ProfileName       string `json:"profileName"`
+	SteamName         string `json:"steamName"`
+	IsJIP             bool   `json:"isJIP" gorm:"column:is_jip"`
+	RoleDescription   string `json:"roleDescription"`
+	MissionID         uint
+	Mission           Mission `gorm:"foreignkey:MissionID"`
 }
 
 func writeDisconnectEvent(data string) {
@@ -448,18 +455,18 @@ func writeDisconnectEvent(data string) {
 
 	// get all attendance rows of type without disconnect rows
 	var attendanceRows []AttendanceItem
-	db.Where("player_uid = ? AND event_type = ? AND disconnect_time = '0000-00-00 00:00:00'", event.PlayerUID, event.EventType).Find(&attendanceRows)
+	db.Where("player_uid = ? AND event_type = ? AND disconnect_time_utc = '0000-00-00 00:00:00'", event.PlayerUID, event.EventType).Find(&attendanceRows)
 	for _, row := range attendanceRows {
 		// update disconnect time
-		if row.JoinTime.Before(time.Now().Add(-1*time.Hour)) && row.EventType == "Mission" {
+		if row.JoinTimeUTC.Before(time.Now().Add(-1*time.Hour)) && row.EventType == "Mission" {
 			// if mission JoinTime is more than 1 hour ago, simplify this to write DisconnectTime as 1 hour from JoinTime. this to account for crashes where people don't immediately rejoin
-			row.DisconnectTime = row.JoinTime.Add(-1 * time.Hour)
-		} else if row.JoinTime.Before(time.Now().Add(-6*time.Hour)) && row.EventType == "Server" {
+			row.DisconnectTimeUTC = row.JoinTimeUTC.Add(-1 * time.Hour)
+		} else if row.JoinTimeUTC.Before(time.Now().Add(-6*time.Hour)) && row.EventType == "Server" {
 			// if server JoinTime is more than 6 hours ago, simplify this to write DisconnectTime as 6 hours from JoinTime. this to account for server crashes where people don't immediately rejoin without overwriting valid (potentially lengthy) server sessions
-			row.DisconnectTime = row.JoinTime.Add(-6 * time.Hour)
+			row.DisconnectTimeUTC = row.JoinTimeUTC.Add(-6 * time.Hour)
 		} else {
 			// otherwise, update DisconnectTime to now
-			row.DisconnectTime = time.Now()
+			row.DisconnectTimeUTC = time.Now()
 		}
 		db.Save(&row)
 	}
@@ -493,10 +500,10 @@ func writeAttendance(data string) {
 	if event.EventType == "Server" {
 		// check for most recent existing attendance row
 		var attendance AttendanceItem
-		db.Where("player_id = ? AND player_uid = ? AND event_type = ?", event.PlayerId, event.PlayerUID, event.EventType).Order("join_time desc").First(&attendance)
+		db.Where("player_id = ? AND player_uid = ? AND event_type = ?", event.PlayerId, event.PlayerUID, event.EventType).Order("join_time_utc desc").First(&attendance)
 		if attendance.ID != 0 {
 			// update disconnect time
-			row := db.Model(&attendance).Update("disconnect_time", attendance.DisconnectTime)
+			row := db.Model(&attendance).Update("disconnect_time_utc", attendance.DisconnectTimeUTC)
 			if row.Error != nil {
 				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, row.Error))
 				return
@@ -505,8 +512,8 @@ func writeAttendance(data string) {
 
 		} else {
 			// insert new row
-			event.JoinTime = time.Now()
-			row := db.Create(&event)
+			event.JoinTimeUTC = time.Now()
+			row := db.Omit("MissionID").Create(&event)
 			if row.Error != nil {
 				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, row.Error))
 				return
@@ -518,7 +525,7 @@ func writeAttendance(data string) {
 		var mission Mission
 		db.Where("mission_hash = ?", event.MissionHash).First(&mission)
 		if mission.ID != 0 {
-			event.MissionID = int(mission.ID)
+			event.MissionID = uint(mission.ID)
 		} else {
 			writeLog(functionName, fmt.Sprintf(`["Mission not found for hash %s", "ERROR"]`, event.MissionHash))
 			return
@@ -526,17 +533,17 @@ func writeAttendance(data string) {
 
 		// check for most recent JoinTime for this player and event type
 		var attendance AttendanceItem
-		db.Where("player_id = ? AND player_uid = ? AND event_type = ? AND mission_hash = ?", event.PlayerId, event.PlayerUID, event.EventType, event.MissionHash).Order("join_time desc").First(&attendance)
+		db.Where("player_id = ? AND player_uid = ? AND event_type = ? AND mission_hash = ?", event.PlayerId, event.PlayerUID, event.EventType, event.MissionHash).Order("join_time_utc desc").First(&attendance)
 		if attendance.ID != 0 {
 			// update disconnect time
-			row := db.Model(&attendance).Update("disconnect_time", time.Now())
+			row := db.Model(&attendance).Update("disconnect_time_utc", time.Now())
 			if row.Error != nil {
 				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, row.Error))
 				return
 			}
 			rowId, playerUid = attendance.ID, attendance.PlayerUID
 		} else {
-			event.JoinTime = time.Now()
+			event.JoinTimeUTC = time.Now()
 			// insert new row
 			row := db.Create(&event)
 			if row.Error != nil {
@@ -653,17 +660,28 @@ func fixEscapeQuotes(s string) string {
 }
 
 func writeLog(functionName string, data string) {
+	// get calling function & line
+	_, file, line, _ := runtime.Caller(1)
+	log.Printf(`%s:%d:%s %s`, path.Base(file), line, functionName, data)
+
+	if extensionCallbackFnc == nil {
+		return
+	}
+
 	statusName := C.CString("AttendanceTracker")
 	defer C.free(unsafe.Pointer(statusName))
 	statusFunction := C.CString(functionName)
 	defer C.free(unsafe.Pointer(statusFunction))
 	statusParam := C.CString(data)
 	defer C.free(unsafe.Pointer(statusParam))
-	runExtensionCallback(statusName, statusFunction, statusParam)
 
-	// get calling function & line
-	_, file, line, _ := runtime.Caller(1)
-	log.Printf(`%s:%d:%s %s`, path.Base(file), line, functionName, data)
+	runExtensionCallback(statusName, statusFunction, statusParam)
+}
+
+func disconnectDB() {
+	if db != nil {
+		db = nil
+	}
 }
 
 //export goRVExtension
@@ -684,8 +702,11 @@ func goRVExtension(output *C.char, outputsize C.size_t, input *C.char) {
 	case "getTimestamp":
 		temp = fmt.Sprintf(`["%s"]`, getTimestamp())
 	case "connectDB":
-		connectDB()
 		temp = fmt.Sprintf(`["%s"]`, "Connecting to DB")
+		connectDB()
+	case "disconnectDB":
+		temp = fmt.Sprintf(`["%s"]`, "Disconnecting from DB")
+		disconnectDB()
 	case "getMissionHash":
 		temp = fmt.Sprintf(`["%s"]`, getMissionHash())
 	default:
@@ -708,4 +729,14 @@ func goRVExtensionRegisterCallback(fnc C.extensionCallback) {
 	extensionCallbackFnc = fnc
 }
 
-func main() {}
+func main() {
+	loadConfig()
+	fmt.Println("Running DB connect/migrate to build schema...")
+	err := connectDB()
+	if err != nil {
+		fmt.Println(err)
+	} else {
+		fmt.Println("DB connect/migrate complete!")
+	}
+	fmt.Scanln()
+}

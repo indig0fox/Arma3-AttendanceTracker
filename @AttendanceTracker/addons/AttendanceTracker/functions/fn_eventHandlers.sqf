@@ -45,7 +45,7 @@
 				private _playerUID = _args select 2;
 				if (allUsers find _playerID == -1) exitWith {
 					[format ["(EventHandler) OnUserConnected: %1 (UID %2) is no longer connected, exiting CBA PFH", _playerUID], "DEBUG"] call attendanceTracker_fnc_log;
-					_args call attendanceTracker_fnc_writeDisconnect;
+					_args call attendanceTracker_fnc_writeConnect;
 					[_handle] call CBA_fnc_removePerFrameHandler;
 				};
 
@@ -88,7 +88,7 @@
 			_playerUID,
 			_profileName,
 			_steamName
-		] call attendanceTracker_fnc_writeDisconnect;
+		] call attendanceTracker_fnc_writeConnect;
 	}],
 	["PlayerConnected", {
 		params ["_id", "_uid", "_name", "_jip", "_owner", "_idstr"];
@@ -144,7 +144,7 @@
 				private _clientStateNumber = _userInfo select 6;
 				if (_clientStateNumber < 6) exitWith {
 					[format ["(EventHandler) PlayerConnected: %1 (UID) is no longer connected to the mission, exiting CBA PFH", _playerID], "DEBUG"] call attendanceTracker_fnc_log;
-					_args call attendanceTracker_fnc_writeDisconnect;
+					_args call attendanceTracker_fnc_writeConnect;
 					[_handle] call CBA_fnc_removePerFrameHandler;
 				};
 
@@ -190,7 +190,7 @@
 			_steamName,
 			_jip,
 			nil
-		] call attendanceTracker_fnc_writeDisconnect;
+		] call attendanceTracker_fnc_writeConnect;
 
 		false;
 	}],
@@ -222,7 +222,7 @@
 			_steamName,
 			nil,
 			nil
-		] call attendanceTracker_fnc_writeDisconnect;
+		] call attendanceTracker_fnc_writeConnect;
 
 		[
 			"Mission",
@@ -232,6 +232,6 @@
 			_steamName,
 			nil,
 			nil
-		] call attendanceTracker_fnc_writeDisconnect;
+		] call attendanceTracker_fnc_writeConnect;
 	}]
 ];
