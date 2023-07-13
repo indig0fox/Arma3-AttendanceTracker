@@ -17,8 +17,15 @@ _hash set ["profileName", _profileName];
 _hash set ["steamName", _steamName];
 _hash set ["isJIP", _isJIP];
 _hash set ["roleDescription", _roleDescription];
-_hash set ["missionHash", missionNamespace getVariable ["AttendanceTracker_missionHash", ""]];
 
-"AttendanceTracker" callExtension ["writeAttendance", [[_hash] call CBA_fnc_encodeJSON]];
+[
+	{
+		missionNamespace getVariable ["AttendanceTracker_DBConnected", false] &&
+		missionNamespace getVariable ["AttendanceTracker_missionId", -1] > 0
+	},
+	{"AttendanceTracker" callExtension ["writeAttendance", [[_this] call CBA_fnc_encodeJSON]]},
+	_hash, // args
+	30 // timeout in seconds. if DB never connects, we don't want these building up
+] call CBA_fnc_waitUntilAndExecute;
 
 true;

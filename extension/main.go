@@ -9,20 +9,23 @@ package main
 import "C" // This is required to import the C code
 
 import (
-	"context"
 	"crypto/md5"
-	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"path"
+	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 	"unsafe"
 
 	_ "github.com/go-sql-driver/mysql"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
 
 var EXTENSION_VERSION string = "0.0.1"
@@ -32,16 +35,28 @@ var extensionCallbackFnc C.extensionCallback
 var ADDON_FOLDER string = getDir() + "\\@AttendanceTracker"
 var LOG_FILE string = ADDON_FOLDER + "\\attendanceTracker.log"
 var CONFIG_FILE string = ADDON_FOLDER + "\\config.json"
+var SERVER_TIME_FILE string = ADDON_FOLDER + "\\lastServerTime.txt"
 
 var ATTENDANCE_TABLE string = "attendance"
 var MISSIONS_TABLE string = "missions"
 var WORLDS_TABLE string = "worlds"
 
+var LAST_SERVER_TIME uint64 = 0
+
 // ! TODO make a hash to save key:netId from A3 value:rowId from join event
 
-var ATConfig AttendanceTrackerConfig
+var Config AttendanceTrackerConfig
+var ATConfig ATSQLConfig
+var A3Config ArmaConfig
 
-type AttendanceTrackerConfig struct {
+type ArmaConfig struct {
+	DBUpdateIntervalSeconds     int  `json:"dbUpdateIntervalSeconds"`
+	Debug                       bool `json:"debug"`
+	ServerEventFillNullMinutes  int  `json:"serverEventFillNullMinutes"`
+	MissionEventFillNullMinutes int  `json:"missionEventFillNullMinutes"`
+}
+
+type ATSQLConfig struct {
 	MySQLHost     string `json:"mysqlHost"`
 	MySQLPort     int    `json:"mysqlPort"`
 	MySQLUser     string `json:"mysqlUser"`
@@ -49,8 +64,13 @@ type AttendanceTrackerConfig struct {
 	MySQLDatabase string `json:"mysqlDatabase"`
 }
 
+type AttendanceTrackerConfig struct {
+	ArmaConfig ArmaConfig  `json:"armaConfig"`
+	SQLConfig  ATSQLConfig `json:"sqlConfig"`
+}
+
 // database connection
-var db *sql.DB
+var db *gorm.DB
 
 // configure log output
 func init() {
@@ -74,7 +94,8 @@ func version() {
 func getDir() string {
 	dir, err := os.Getwd()
 	if err != nil {
-		log.Fatal(err)
+		writeLog("getDir", fmt.Sprintf(`["Error getting working directory: %v", "ERROR"]`, err))
+		return ""
 	}
 	return dir
 }
@@ -95,27 +116,58 @@ func loadConfig() {
 	// LOG_FILE = ADDON_FOLDER + "\\attendanceTracker.log"
 	// CONFIG_FILE = ADDON_FOLDER + "\\config.json"
 
-	file, err := os.Open(CONFIG_FILE)
+	file, err := os.OpenFile(CONFIG_FILE, os.O_RDONLY|os.O_CREATE, 0666)
 	if err != nil {
 		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 		return
 	}
 	defer file.Close()
 
+	// log.Println("Loading config from", CONFIG_FILE)
+
 	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&ATConfig)
+	err = decoder.Decode(&Config)
 	if err != nil {
 		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 		return
 	}
+	A3Config = Config.ArmaConfig
+	ATConfig = Config.SQLConfig
+
 	writeLog(functionName, `["Config loaded", "INFO"]`)
+}
+
+func getSettings() string {
+	// get settings from A3Config and send to Arma
+	var settings string = `[`
+	// iterate through keys in A3Config struct
+	v := reflect.ValueOf(A3Config)
+	for i := 0; i < v.NumField(); i++ {
+		// get field name
+		fieldName := v.Type().Field(i).Name
+		// get field value
+		fieldValue := v.Field(i).Interface()
+		// if field value is a string, add quotes
+		fieldValueString := fmt.Sprintf("%v", fieldValue)
+		if reflect.TypeOf(fieldValue).Kind() == reflect.String {
+			fieldValueString = fmt.Sprintf(`"%v"`, fieldValue)
+		}
+		// add to settings, key should be lowercase
+		settings += fmt.Sprintf(`["%s", %s],`, strings.ToLower(fieldName), fieldValueString)
+	}
+
+	// remove last comma
+	settings = strings.TrimSuffix(settings, ",")
+	settings += `]`
+
+	return settings
 }
 
 func getMissionHash() string {
 	functionName := "getMissionHash"
 	// get md5 hash of string
 	// https://stackoverflow.com/questions/2377881/how-to-get-a-md5-hash-from-a-string-in-golang
-	hash := md5.Sum([]byte(time.Now().UTC().Format("2006-01-02 15:04:05")))
+	hash := md5.Sum([]byte(time.Now().Format("2006-01-02 15:04:05")))
 
 	// convert to string
 	hashString := fmt.Sprintf(`%x`, hash)
@@ -123,219 +175,303 @@ func getMissionHash() string {
 	return hashString
 }
 
-func connectDB() string {
-	functionName := "connectDB"
+func updateServerTime(serverTime uint64) {
+	functionName := "updateServerTime"
+
 	var err error
+
+	// check .txt file for server time
+	// first, check if it exists
+	if _, err := os.Stat(SERVER_TIME_FILE); os.IsNotExist(err) {
+		// file does not exist, create it and write serverTime to it
+		writeLog(functionName, `["Server time file does not exist, creating it", "DEBUG"]`)
+		err = ioutil.WriteFile(SERVER_TIME_FILE, []byte(strconv.FormatUint(serverTime, 10)), 0666)
+		if err != nil {
+			writeLog(functionName, fmt.Sprintf(`["Error writing server time to file: %v", "ERROR"]`, err))
+		}
+		return
+	}
+
+	// file exists, read it
+	line, err := ioutil.ReadFile(SERVER_TIME_FILE)
+	if err != nil {
+		writeLog(functionName, fmt.Sprintf(`["Error reading server time file: %v", "ERROR"]`, err))
+		return
+	}
+
+	// convert to uint64
+	LAST_SERVER_TIME, err := strconv.ParseUint(string(line), 10, 64)
+	if err != nil {
+		writeLog(functionName, fmt.Sprintf(`["Error converting server time to uint64: %v", "ERROR"]`, err))
+		return
+	}
+
+	// if serverTime is less than last server time, close server events
+	if serverTime < LAST_SERVER_TIME {
+		closeServerEvents()
+	}
+	LAST_SERVER_TIME = serverTime
+
+	// write server time to file
+	err = ioutil.WriteFile(SERVER_TIME_FILE, []byte(strconv.FormatUint(serverTime, 10)), 0666)
+	if err != nil {
+		writeLog(functionName, fmt.Sprintf(`["Error writing server time to file: %v", "ERROR"]`, err))
+		return
+	}
+}
+
+func closeServerEvents() {
+	functionName := "closeServerEvents"
+	writeLog(functionName, `["Filling missing disconnect events due to server restart.", "DEBUG"]`)
+	// get all events with null DisconnectTime & set DisconnectTime to current time
+	var events []AttendanceItem
+	db.Where("disconnect_time_utc = '0000-00-00 00:00:00'").Find(&events)
+	for _, event := range events {
+
+		// if difference between JoinTime and current time is greater than threshold, set to threshold
+		if event.EventType == "Server" {
+			var timeThreshold time.Time = event.JoinTimeUTC.Add(-time.Duration(A3Config.ServerEventFillNullMinutes) * time.Minute)
+			if event.JoinTimeUTC.Before(timeThreshold) {
+				event.DisconnectTimeUTC = timeThreshold
+			} else {
+				event.DisconnectTimeUTC = time.Now()
+			}
+		} else if event.EventType == "Mission" {
+			var timeThreshold time.Time = event.JoinTimeUTC.Add(-time.Duration(A3Config.MissionEventFillNullMinutes) * time.Minute)
+			if event.JoinTimeUTC.Before(timeThreshold) {
+				event.DisconnectTimeUTC = timeThreshold
+			} else {
+				event.DisconnectTimeUTC = time.Now()
+			}
+		}
+		db.Save(&event)
+		if db.Error != nil {
+			writeLog(functionName, fmt.Sprintf(`["Error filling missing disconnects: %v", "ERROR"]`, db.Error))
+			return
+		}
+	}
+
+	// log how many
+	writeLog(functionName, fmt.Sprintf(`["%d missing disconnects filled.", "INFO"]`, len(events)))
+}
+
+func connectDB() error {
 
 	// load config
 	loadConfig()
 
 	// connect to database
-	connectionString := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s", ATConfig.MySQLUser, ATConfig.MySQLPassword, ATConfig.MySQLHost, ATConfig.MySQLPort, ATConfig.MySQLDatabase)
+	var err error
+	dsn := fmt.Sprintf(
+		"%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True",
+		ATConfig.MySQLUser,
+		ATConfig.MySQLPassword,
+		ATConfig.MySQLHost,
+		ATConfig.MySQLPort,
+		ATConfig.MySQLDatabase,
+	)
 
-	db, err = sql.Open("mysql", connectionString)
+	// log dsn and pause
+	// writeLog("connectDB", fmt.Sprintf(`["DSN: %s", "INFO"]`, dsn))
+	// fmt.Println(dsn)
+
+	if db != nil {
+		// log success and return
+		writeLog("connectDB", `["Database already connected", "INFO"]`)
+		writeLog("connectDB", `["SUCCESS", "INFO"]`)
+		return nil
+	}
+
+	db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
-		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
-		return "ERROR"
-	}
-	if db == nil {
-		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, "db is nil"))
-		return "ERROR"
-	}
-	// defer db.Close()
-
-	db.SetConnMaxLifetime(time.Minute * 3)
-	db.SetMaxOpenConns(10)
-	db.SetMaxIdleConns(10)
-
-	pingErr := db.Ping()
-	if pingErr != nil {
-		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, pingErr))
-		return "ERROR"
+		// log.Println(err)
+		writeLog("connectDB", fmt.Sprintf(`["%s", "ERROR"]`, err))
+		return err
 	}
 
-	// Check the server version
-	var version string
-	err = db.QueryRow("SELECT VERSION()").Scan(&version)
+	// Migrate the schema
+	err = db.Set("gorm:table_options", "ENGINE=InnoDB").AutoMigrate(&World{}, &Mission{}, &AttendanceItem{})
 	if err != nil {
-		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
-		return "ERROR"
+		// log.Println(err)
+		writeLog("connectDB", fmt.Sprintf(`["%s", "ERROR"]`, err))
+		return err
 	}
-	writeLog(functionName, fmt.Sprintf(`["Connected to MySQL/MariaDB version %s", "INFO"]`, version))
-	writeLog(functionName, `["SUCCESS", "INFO"]`)
-	return version
+
+	writeLog("connectDB", `["Database connected", "INFO"]`)
+	writeLog("connectDB", `["SUCCESS", "INFO"]`)
+	return nil
 }
 
-type WorldInfo struct {
+type World struct {
+	gorm.Model
 	Author            string  `json:"author"`
 	WorkshopID        string  `json:"workshopID"`
 	DisplayName       string  `json:"displayName"`
 	WorldName         string  `json:"worldName"`
 	WorldNameOriginal string  `json:"worldNameOriginal"`
-	WorldSize         int     `json:"worldSize"`
+	WorldSize         float32 `json:"worldSize"`
 	Latitude          float32 `json:"latitude"`
 	Longitude         float32 `json:"longitude"`
+	Missions          []Mission
 }
 
 func writeWorldInfo(worldInfo string) {
 	functionName := "writeWorldInfo"
 	// writeLog(functionName, fmt.Sprintf(`["%s", "DEBUG"]`, worldInfo))
 	// worldInfo is json, parse it
-	var wi WorldInfo
+	var wi World
 	fixedString := fixEscapeQuotes(trimQuotes(worldInfo))
 	err := json.Unmarshal([]byte(fixedString), &wi)
 	if err != nil {
 		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 		return
 	}
-	// write to log as json
-	// writeLog(functionName, fmt.Sprintf(`["%s", "DEBUG"]`, json.Marshal(wi)))
 
-	// write to database
-	// check if world exists
-	var worldID int
-	err = db.QueryRow("SELECT id FROM worlds WHERE world_name = ?", wi.WorldName).Scan(&worldID)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			// world does not exist, insert it
-			stmt, err := db.Prepare(fmt.Sprintf(
-				"INSERT INTO %s (author, workshop_id, display_name, world_name, world_name_original, world_size, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-				WORLDS_TABLE,
-			))
-			if err != nil {
-				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
-				return
-			}
-			defer stmt.Close()
-			res, err := stmt.Exec(wi.Author, wi.WorkshopID, wi.DisplayName, wi.WorldName, wi.WorldNameOriginal, wi.WorldSize, wi.Latitude, wi.Longitude)
-			if err != nil {
-				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
-				return
-			}
-			lastID, err := res.LastInsertId()
-			if err != nil {
-				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
-				return
-			}
-			writeLog(functionName, fmt.Sprintf(`["World inserted with ID %d", "INFO"]`, lastID))
-		} else {
-			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
-			return
-		}
-	} else {
-		// world exists, update it
-		stmt, err := db.Prepare(fmt.Sprintf(
-			"UPDATE %s SET author = ?, workshop_id = ?, display_name = ?, world_name = ?, world_name_original = ?, world_size = ?, latitude = ?, longitude = ? WHERE id = ?",
-			WORLDS_TABLE,
-		))
+	// prevent crash
+	if db == nil {
+		err := connectDB()
 		if err != nil {
 			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 			return
 		}
-		defer stmt.Close()
-		res, err := stmt.Exec(wi.Author, wi.WorkshopID, wi.DisplayName, wi.WorldName, wi.WorldNameOriginal, wi.WorldSize, wi.Latitude, wi.Longitude, worldID)
-		if err != nil {
-			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
-			return
-		}
-		rowsAffected, err := res.RowsAffected()
-		if err != nil {
-			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
-			return
-		}
-		writeLog(functionName, fmt.Sprintf(`["World updated with %d rows affected", "INFO"]`, rowsAffected))
 	}
+
+	// write world if not exist
+	var world World
+	var returnId uint
+	db.Where("world_name = ?", wi.WorldName).First(&world)
+	if world.ID == 0 {
+		writeLog(functionName, `["World not found, writing new world", "INFO"]`)
+		result := db.Create(&wi)
+		if result.Error != nil {
+			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, result.Error))
+			return
+		}
+		writeLog(functionName, fmt.Sprintf(`["World written with ID %d", "INFO"]`, wi.ID))
+		returnId = wi.ID
+	} else {
+		// return ID
+		writeLog(functionName, fmt.Sprintf(`["World exists with ID %d", "INFO"]`, world.ID))
+		returnId = world.ID
+	}
+
+	writeLog(functionName, fmt.Sprintf(`["WORLD_ID", %d]`, returnId))
 }
 
-type MissionInfo struct {
-	MissionName       string `json:"missionName"`
-	BriefingName      string `json:"briefingName"`
-	MissionNameSource string `json:"missionNameSource"`
-	OnLoadName        string `json:"onLoadName"`
-	Author            string `json:"author"`
-	ServerName        string `json:"serverName"`
-	ServerProfile     string `json:"serverProfile"`
-	MissionStart      string `json:"missionStart"`
-	MissionHash       string `json:"missionHash"`
-	WorldName         string `json:"worldName"`
+type Mission struct {
+	gorm.Model
+	MissionName       string    `json:"missionName"`
+	BriefingName      string    `json:"briefingName"`
+	MissionNameSource string    `json:"missionNameSource"`
+	OnLoadName        string    `json:"onLoadName"`
+	Author            string    `json:"author"`
+	ServerName        string    `json:"serverName"`
+	ServerProfile     string    `json:"serverProfile"`
+	MissionStart      time.Time `json:"missionStart" gorm:"type:datetime"`
+	MissionHash       string    `json:"missionHash" gorm:"index"`
+	WorldName         string    `json:"worldName" gorm:"-"`
+	WorldID           uint
+	World             World `gorm:"foreignkey:WorldID"`
+	Attendees         []AttendanceItem
 }
 
-func writeMissionInfo(missionInfo string) {
-	functionName := "writeMissionInfo"
+func writeMission(missionJSON string) {
+	functionName := "writeMission"
 	var err error
-	// writeLog(functionName, fmt.Sprintf(`["%s", "DEBUG"]`, missionInfo))
-	// missionInfo is json, parse it
-	var mi MissionInfo
-	fixedString := fixEscapeQuotes(trimQuotes(missionInfo))
+	// writeLog(functionName, fmt.Sprintf(`["%s", "DEBUG"]`, Mission))
+	// Mission is json, parse it
+	var mi Mission
+	fixedString := fixEscapeQuotes(trimQuotes(missionJSON))
 	err = json.Unmarshal([]byte(fixedString), &mi)
 	if err != nil {
 		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 		return
 	}
 
-	// check if mission exists based on hash
-	var worldID int
-	err = db.QueryRow("SELECT id FROM worlds WHERE world_name = ?", mi.WorldName).Scan(&worldID)
-	if err != nil {
-		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
-		return
-	}
-
-	var stmt *sql.Stmt
-	var res sql.Result
-
-	if worldID != 0 {
-		sqlWorld := fmt.Sprintf(
-			"INSERT INTO %s (mission_name, briefing_name, mission_name_source, on_load_name, author, server_name, server_profile, mission_start, mission_hash, world_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			MISSIONS_TABLE,
-		)
-		stmt, err = db.Prepare(sqlWorld)
+	// prevent crash
+	if db == nil {
+		err := connectDB()
 		if err != nil {
 			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 			return
 		}
-		defer stmt.Close()
-
-		res, err = stmt.Exec(mi.MissionName, mi.BriefingName, mi.MissionNameSource, mi.OnLoadName, mi.Author, mi.ServerName, mi.ServerProfile, mi.MissionStart, mi.MissionHash, worldID)
-
-	} else {
-		// if no world was found, write without it
-		sqlNoWorld := fmt.Sprintf(
-			"INSERT INTO %s (mission_name, briefing_name, mission_name_source, on_load_name, author, server_name, server_profile, mission_start, mission_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			MISSIONS_TABLE,
-		)
-		stmt, err = db.Prepare(sqlNoWorld)
-		if err != nil {
-			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
-			return
-		}
-		defer stmt.Close()
-		res, err = stmt.Exec(mi.MissionName, mi.BriefingName, mi.MissionNameSource, mi.OnLoadName, mi.Author, mi.ServerName, mi.ServerProfile, mi.MissionStart, mi.MissionHash)
 	}
 
-	if err != nil {
-		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+	// get world from WorldName
+	var world World
+	db.Where("world_name = ?", mi.WorldName).First(&world)
+	if world.ID == 0 {
+		writeLog(functionName, fmt.Sprintf(`["World not found for %s, cannot write mission!", "ERROR"]`, mi.WorldName))
 		return
 	}
+	mi.WorldID = world.ID
 
-	lastID, err := res.LastInsertId()
-	if err != nil {
-		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+	// write mission to database
+	db.Create(&mi)
+	if db.Error != nil {
+		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, db.Error))
 		return
 	}
-	writeLog(functionName, fmt.Sprintf(`["Mission inserted with ID %d", "INFO"]`, lastID))
-	writeLog(functionName, fmt.Sprintf(`["MISSION_ID", "%d"]`, lastID))
+	writeLog(functionName, fmt.Sprintf(`["Mission written with ID %d", "INFO"]`, mi.ID))
+	writeLog(functionName, fmt.Sprintf(`["MISSION_ID", %d]`, mi.ID))
 }
 
-type AttendanceLogItem struct {
-	EventType       string `json:"eventType"`
-	PlayerId        string `json:"playerId"`
-	PlayerUID       string `json:"playerUID"`
-	ProfileName     string `json:"profileName"`
-	SteamName       string `json:"steamName"`
-	IsJIP           bool   `json:"isJIP"`
-	RoleDescription string `json:"roleDescription"`
-	MissionHash     string `json:"missionHash"`
+type AttendanceItem struct {
+	gorm.Model
+	MissionHash       string `json:"missionHash"`
+	EventType         string `json:"eventType"`
+	PlayerId          string `json:"playerId"`
+	PlayerUID         string `json:"playerUID"`
+	JoinTimeUTC       time.Time
+	DisconnectTimeUTC time.Time
+	ProfileName       string `json:"profileName"`
+	SteamName         string `json:"steamName"`
+	IsJIP             bool   `json:"isJIP" gorm:"column:is_jip"`
+	RoleDescription   string `json:"roleDescription"`
+	MissionID         uint
+	Mission           Mission `gorm:"foreignkey:MissionID"`
+}
+
+func writeDisconnectEvent(data string) {
+	functionName := "writeDisconnectEvent"
+	var err error
+	// data is json, parse it
+	stringjson := fixEscapeQuotes(trimQuotes(data))
+	var event AttendanceItem
+	err = json.Unmarshal([]byte(stringjson), &event)
+	if err != nil {
+		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+		return
+	}
+
+	// prevent crash
+	if db == nil {
+		err := connectDB()
+		if err != nil {
+			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+			return
+		}
+	}
+
+	// get all attendance rows of type without disconnect rows
+	var attendanceRows []AttendanceItem
+	db.Where("player_uid = ? AND event_type = ? AND disconnect_time_utc = '0000-00-00 00:00:00'", event.PlayerUID, event.EventType).Find(&attendanceRows)
+	for _, row := range attendanceRows {
+		// update disconnect time
+		if row.JoinTimeUTC.Before(time.Now().Add(-1*time.Hour)) && row.EventType == "Mission" {
+			// if mission JoinTime is more than 1 hour ago, simplify this to write DisconnectTime as 1 hour from JoinTime. this to account for crashes where people don't immediately rejoin
+			row.DisconnectTimeUTC = row.JoinTimeUTC.Add(-1 * time.Hour)
+		} else if row.JoinTimeUTC.Before(time.Now().Add(-6*time.Hour)) && row.EventType == "Server" {
+			// if server JoinTime is more than 6 hours ago, simplify this to write DisconnectTime as 6 hours from JoinTime. this to account for server crashes where people don't immediately rejoin without overwriting valid (potentially lengthy) server sessions
+			row.DisconnectTimeUTC = row.JoinTimeUTC.Add(-6 * time.Hour)
+		} else {
+			// otherwise, update DisconnectTime to now
+			row.DisconnectTimeUTC = time.Now()
+		}
+		db.Save(&row)
+	}
+
+	writeLog(functionName, fmt.Sprintf(`["Disconnect events written for %s", "DEBUG"]`, event.PlayerUID))
 }
 
 func writeAttendance(data string) {
@@ -343,190 +479,82 @@ func writeAttendance(data string) {
 	var err error
 	// data is json, parse it
 	stringjson := fixEscapeQuotes(trimQuotes(data))
-	var event AttendanceLogItem
+	var event AttendanceItem
 	err = json.Unmarshal([]byte(stringjson), &event)
 	if err != nil {
 		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 		return
 	}
 
-	// get MySQL friendly NOW
-	now := time.Now().UTC().Format("2006-01-02 15:04:05")
-
 	// prevent crash
 	if db == nil {
-		writeLog(functionName, `["db is nil", "ERROR"]`)
-		return
-	}
-
-	// send to DB
-	var result sql.Result
-
-	if event.EventType == "Server" {
-		sql := fmt.Sprintf(
-			`INSERT INTO %s (join_time, event_type, player_id, player_uid, profile_name, steam_name, is_jip, role_description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			ATTENDANCE_TABLE,
-		)
-		result, err = db.ExecContext(
-			context.Background(),
-			sql,
-			now,
-			event.EventType,
-			event.PlayerId,
-			event.PlayerUID,
-			event.ProfileName,
-			event.SteamName,
-			event.IsJIP,
-			event.RoleDescription,
-		)
-	} else if event.EventType == "Mission" {
-		sql := fmt.Sprintf(
-			`INSERT INTO %s (join_time, event_type, player_id, player_uid, profile_name, steam_name, is_jip, role_description, mission_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			ATTENDANCE_TABLE,
-		)
-		result, err = db.ExecContext(
-			context.Background(),
-			sql,
-			now,
-			event.EventType,
-			event.PlayerId,
-			event.PlayerUID,
-			event.ProfileName,
-			event.SteamName,
-			event.IsJIP,
-			event.RoleDescription,
-			event.MissionHash,
-		)
-	}
-
-	if err != nil {
-		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
-		return
-	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
-		return
-	}
-
-	writeLog(functionName, fmt.Sprintf(`["Saved attendance for %s to row id %d", "INFO"]`, event.ProfileName, id))
-	if event.EventType == "Server" {
-		writeLog(functionName, fmt.Sprintf(`["ATT_LOG", ["SERVER", "%s", "%d"]]`, event.PlayerId, id))
-	} else if event.EventType == "Mission" {
-		writeLog(functionName, fmt.Sprintf(`["ATT_LOG", ["MISSION", "%s", "%d"]]`, event.PlayerId, id))
-	}
-
-}
-
-type DisconnectItem struct {
-	EventType   string `json:"eventType"`
-	PlayerId    string `json:"playerId"`
-	MissionHash string `json:"missionHash"`
-}
-
-func writeDisconnectEvent(data string) {
-	functionName := "writeDisconnectEvent"
-	// data is json, parse it
-	stringjson := fixEscapeQuotes(trimQuotes(data))
-	var event DisconnectItem
-	err := json.Unmarshal([]byte(stringjson), &event)
-	if err != nil {
-		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
-		return
-	}
-
-	// get MySQL friendly NOW
-	now := time.Now().UTC().Format("2006-01-02 15:04:05")
-
-	// prevent crash
-	if db == nil {
-		writeLog(functionName, `["db is nil", "ERROR"]`)
-		return
-	}
-
-	// first, check if a row exists for this player
-	var sql string
-	if event.EventType == "Mission" {
-		sql = fmt.Sprintf(
-			`
-			SELECT id FROM attendance
-			WHERE player_id = '%s' and event_type = '%s' and mission_hash = '%s' and disconnect_time IS NULL and join_time >= (NOW() - INTERVAL 24 hour)
-			ORDER BY join_time DESC
-			`,
-			event.PlayerId,
-			event.EventType,
-			event.MissionHash,
-		)
-	} else if event.EventType == "Server" {
-		sql = fmt.Sprintf(
-			`
-			SELECT id FROM attendance
-			WHERE player_id = '%s' and event_type = '%s' and disconnect_time IS NULL and join_time >= (NOW() - INTERVAL 24 hour)
-			ORDER BY join_time DESC
-			`,
-			event.PlayerId,
-			event.EventType,
-		)
-	} else {
-		writeLog(functionName, fmt.Sprintf(`["Unknown event type %s", "ERROR"]`, event.EventType))
-		return
-	}
-
-	rows, err := db.QueryContext(context.Background(), sql)
-	if err != nil {
-		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
-		return
-	}
-	defer rows.Close()
-
-	// if there is a row, update it
-	if rows.Next() {
-		// create interface to hold values
-		var rowId int64
-
-		err = rows.Scan(&rowId)
+		err := connectDB()
 		if err != nil {
 			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
 			return
 		}
+	}
 
-		// update the row
-		sql = fmt.Sprintf(
-			`UPDATE attendance SET disconnect_time = '%s' WHERE id = %d`,
-			now,
-			rowId,
-		)
+	var playerUid string
+	var rowId uint
+	if event.EventType == "Server" {
+		// check for most recent existing attendance row
+		var attendance AttendanceItem
+		db.Where("player_id = ? AND player_uid = ? AND event_type = ?", event.PlayerId, event.PlayerUID, event.EventType).Order("join_time_utc desc").First(&attendance)
+		if attendance.ID != 0 {
+			// update disconnect time
+			row := db.Model(&attendance).Update("disconnect_time_utc", time.Now())
+			if row.Error != nil {
+				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, row.Error))
+				return
+			}
+			rowId, playerUid = attendance.ID, attendance.PlayerUID
 
-		_, err := db.ExecContext(context.Background(), sql)
-		if err != nil {
-			writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
+		} else {
+			// insert new row
+			event.JoinTimeUTC = time.Now()
+			row := db.Omit("MissionID").Omit("MissionHash").Create(&event)
+			if row.Error != nil {
+				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, row.Error))
+				return
+			}
+			rowId, playerUid = event.ID, event.PlayerUID
+		}
+	} else if event.EventType == "Mission" {
+		// use gorm to associate this event with the mission sharing a mission hash
+		var mission Mission
+		db.Where("mission_hash = ?", event.MissionHash).First(&mission)
+		if mission.ID != 0 {
+			event.MissionID = uint(mission.ID)
+		} else {
+			writeLog(functionName, fmt.Sprintf(`["Mission not found for hash %s", "ERROR"]`, event.MissionHash))
 			return
 		}
-		writeLog(functionName, fmt.Sprintf(`["Saved disconnect event for %s to row id %d", "INFO"]`, event.PlayerId, rowId))
 
-	} else {
-		// otherwise, log an error
-		writeLog(functionName, fmt.Sprintf(`["No row found for %s, %s", "ERROR"]`, event.PlayerId, event.EventType))
+		// check for most recent JoinTime for this player and event type
+		var attendance AttendanceItem
+		db.Where("player_id = ? AND player_uid = ? AND event_type = ? AND mission_hash = ?", event.PlayerId, event.PlayerUID, event.EventType, event.MissionHash).Order("join_time_utc desc").First(&attendance)
+		if attendance.ID != 0 {
+			// update disconnect time
+			row := db.Model(&attendance).Update("disconnect_time_utc", time.Now())
+			if row.Error != nil {
+				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, row.Error))
+				return
+			}
+			rowId, playerUid = attendance.ID, attendance.PlayerUID
+		} else {
+			event.JoinTimeUTC = time.Now()
+			// insert new row
+			row := db.Create(&event)
+			if row.Error != nil {
+				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, row.Error))
+				return
+			}
+			rowId, playerUid = event.ID, event.PlayerUID
+		}
 	}
-}
 
-func fillLastMissionNull() {
-	functionName := "fillLastMissionNull"
-	// prevent crash
-	if db == nil {
-		writeLog(functionName, `["db is nil", "ERROR"]`)
-		return
-	}
-
-	sql := `call proc_filllastmissionnull`
-
-	_, err := db.ExecContext(context.Background(), sql)
-	if err != nil {
-		writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, err))
-		return
-	}
-	writeLog(functionName, `["Filled mission event NULLs", "INFO"]`)
+	writeLog(functionName, fmt.Sprintf(`["Saved attendance for %s to row id %d", "DEBUG"]`, playerUid, rowId))
 }
 
 func runExtensionCallback(name *C.char, function *C.char, data *C.char) C.int {
@@ -557,10 +585,6 @@ func goRVExtensionArgs(output *C.char, outputsize C.size_t, input *C.char, argv 
 	temp := fmt.Sprintf("Function: %s nb params: %d", C.GoString(input), argc)
 
 	switch C.GoString(input) {
-	case "fillLastMissionNull":
-		{
-			go fillLastMissionNull()
-		}
 	case "writeAttendance":
 		{ // callExtension ["logAttendance", [_hash] call CBA_fnc_encodeJSON]];
 			if argc == 1 {
@@ -568,19 +592,29 @@ func goRVExtensionArgs(output *C.char, outputsize C.size_t, input *C.char, argv 
 			}
 		}
 	case "writeDisconnectEvent":
-		{ // callExtension ["writeDisconnectEvent", [[_hash] call CBA_fnc_encodeJSON]];
-
+		{ // callExtension ["writeDisconnectEvent", [_hash] call CBA_fnc_encodeJSON]];
 			if argc == 1 {
 				go writeDisconnectEvent(out[0])
 			}
 		}
 	case "logMission":
 		if argc == 1 {
-			go writeMissionInfo(out[0])
+			go writeMission(out[0])
 		}
 	case "logWorld":
 		if argc == 1 {
 			go writeWorldInfo(out[0])
+		}
+	case "updateServerTime":
+		if argc == 1 {
+			// convert to uint64
+			serverTime, err := strconv.ParseUint(out[0], 10, 64)
+			if err != nil {
+				writeLog("updateServerTime", fmt.Sprintf(`["%s", "ERROR"]`, err))
+				temp = "ERROR parsing server time"
+			} else {
+				go updateServerTime(serverTime)
+			}
 		}
 	}
 
@@ -612,7 +646,7 @@ func callBackExample() {
 func getTimestamp() string {
 	// get the current unix timestamp in nanoseconds
 	// return time.Now().Local().Unix()
-	return time.Now().UTC().Format("2006-01-02 15:04:05")
+	return time.Now().Format("2006-01-02 15:04:05")
 }
 
 func trimQuotes(s string) string {
@@ -626,18 +660,28 @@ func fixEscapeQuotes(s string) string {
 }
 
 func writeLog(functionName string, data string) {
+	// get calling function & line
+	_, file, line, _ := runtime.Caller(1)
+	log.Printf(`%s:%d:%s %s`, path.Base(file), line, functionName, data)
+
+	if extensionCallbackFnc == nil {
+		return
+	}
+
 	statusName := C.CString("AttendanceTracker")
 	defer C.free(unsafe.Pointer(statusName))
 	statusFunction := C.CString(functionName)
 	defer C.free(unsafe.Pointer(statusFunction))
 	statusParam := C.CString(data)
 	defer C.free(unsafe.Pointer(statusParam))
-	runExtensionCallback(statusName, statusFunction, statusParam)
 
-	// get calling function & line
-	_, file, line, _ := runtime.Caller(1)
-	log.Printf(`%s:%d: %s`, path.Base(file), line, data)
-	log.Printf(`%s: %s`, functionName, data)
+	runExtensionCallback(statusName, statusFunction, statusParam)
+}
+
+func disconnectDB() {
+	if db != nil {
+		db = nil
+	}
 }
 
 //export goRVExtension
@@ -652,11 +696,17 @@ func goRVExtension(output *C.char, outputsize C.size_t, input *C.char) {
 		temp = EXTENSION_VERSION
 	case "getDir":
 		temp = getDir()
+	case "getSettings":
+		loadConfig()
+		temp = getSettings()
 	case "getTimestamp":
 		temp = fmt.Sprintf(`["%s"]`, getTimestamp())
 	case "connectDB":
-		go connectDB()
 		temp = fmt.Sprintf(`["%s"]`, "Connecting to DB")
+		connectDB()
+	case "disconnectDB":
+		temp = fmt.Sprintf(`["%s"]`, "Disconnecting from DB")
+		disconnectDB()
 	case "getMissionHash":
 		temp = fmt.Sprintf(`["%s"]`, getMissionHash())
 	default:
@@ -679,4 +729,14 @@ func goRVExtensionRegisterCallback(fnc C.extensionCallback) {
 	extensionCallbackFnc = fnc
 }
 
-func main() {}
+func main() {
+	loadConfig()
+	fmt.Println("Running DB connect/migrate to build schema...")
+	err := connectDB()
+	if err != nil {
+		fmt.Println(err)
+	} else {
+		fmt.Println("DB connect/migrate complete!")
+	}
+	fmt.Scanln()
+}

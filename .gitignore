@@ -1,5 +1,10 @@
-
 *.log
 *.bak
+*.pbo
+*.dll
+config.json
+**/AttendanceTracker_x64.h
+**/AttendanceTracker.h
+/extension/@AttendanceTracker/
 
-\@AttendanceTracker/config.json
+\@AttendanceTracker.7z

@@ -21,6 +21,7 @@ class CfgFunctions {
 			class writeConnect {};
 			class writeDisconnect {};
 			class timestamp {};
+			class getSettings {};
 			class getMissionHash {};
 			class getWorldInfo {};
 			class missionLoaded {};

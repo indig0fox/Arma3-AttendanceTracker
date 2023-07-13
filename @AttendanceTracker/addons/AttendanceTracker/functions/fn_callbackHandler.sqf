@@ -21,7 +21,9 @@ addMissionEventHandler ["ExtensionCallback", {
 		false;
 	};
 
-	diag_log format ["Raw callback: %1: %2", _function, _data];
+	if (missionNamespace getVariable ["AttendanceTracker_" + "debug", true]) then {
+		diag_log format ["Raw callback: %1: %2", _function, _data];
+	};
 
 	// Parse response from string array
 	private "_response";
@@ -44,12 +46,7 @@ addMissionEventHandler ["ExtensionCallback", {
 		case "connectDB": {
 			systemChat format ["AttendanceTracker: %1", _response#0];
 			[_response#0, _response#1, _function] call attendanceTracker_fnc_log;
-			if (_response#0 == "SUCCESS") then {
-				missionNamespace setVariable ["AttendanceTracker_DBConnected", true];
-
-				// close any null disconnect values from previous mission
-				"AttendanceTracker" callExtension ["fillLastMissionNull", []];
-				
+			if (_response#0 == "SUCCESS") then {				
 				// log world info
 				private _response = "AttendanceTracker" callExtension [
 					"logWorld",
@@ -58,6 +55,15 @@ addMissionEventHandler ["ExtensionCallback", {
 					]
 				];
 				
+				missionNamespace setVariable ["AttendanceTracker_DBConnected", true];
+			};
+		};
+		case "writeWorldInfo": {
+			if (_response#0 == "WORLD_ID") then {
+				AttendanceTracker_worldId = _response#1;
+
+				// world info written. mission info depends on that, so now we'll write it
+
 				// log mission info and get back the row Id to send with future messages
 				private _response = "AttendanceTracker" callExtension [
 					"logMission",
@@ -67,19 +73,10 @@ addMissionEventHandler ["ExtensionCallback", {
 				];
 			};
 		};
-		case "writeMissionInfo": {
+		case "writeMission": {
 			if (_response#0 == "MISSION_ID") then {
-				AttendanceTracker_missionId = parseNumber (_response#1);
-			};
-		};
-		case "writeAttendance": {
-			if (_response#0 == "ATT_LOG") then {
-				(_response#1) params ["_eventType", "_netId", "_rowId"];
-				private _storeIndex = ["SERVER", "MISSION"] find _eventType;
-				((AttendanceTracker getVariable ["rowIds", createHashMap]) getOrDefault [
-					_netId,
-					[nil, nil]
-				]) set [_storeIndex, _rowId];
+				// mission has written so lets finish out init and set missionId for the returned PK, activating the ability for attendance records to send.
+				AttendanceTracker_missionId = _response#1;
 			};
 		};
 		default {
