@@ -503,7 +503,7 @@ func writeAttendance(data string) {
 		db.Where("player_id = ? AND player_uid = ? AND event_type = ?", event.PlayerId, event.PlayerUID, event.EventType).Order("join_time_utc desc").First(&attendance)
 		if attendance.ID != 0 {
 			// update disconnect time
-			row := db.Model(&attendance).Update("disconnect_time_utc", attendance.DisconnectTimeUTC)
+			row := db.Model(&attendance).Update("disconnect_time_utc", time.Now())
 			if row.Error != nil {
 				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, row.Error))
 				return
@@ -513,7 +513,7 @@ func writeAttendance(data string) {
 		} else {
 			// insert new row
 			event.JoinTimeUTC = time.Now()
-			row := db.Omit("MissionID").Create(&event)
+			row := db.Omit("MissionID").Omit("MissionHash").Create(&event)
 			if row.Error != nil {
 				writeLog(functionName, fmt.Sprintf(`["%s", "ERROR"]`, row.Error))
 				return

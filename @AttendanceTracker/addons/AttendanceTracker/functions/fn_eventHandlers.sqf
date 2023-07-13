@@ -51,7 +51,7 @@
 
 				_args call attendanceTracker_fnc_writeConnect;
 			},
-			missionNamespace getVariable ["AttendanceTracker_" + "dbupdateintervalseconds", 300],
+			missionNamespace getVariable ["AttendanceTracker_" + "dbupdateintervalseconds", 90],
 			[
 				"Server",
 				_playerID,
@@ -141,7 +141,10 @@
 				private _playerID = _args select 1;
 				private _playerUID = _args select 2;
 				private _userInfo = getUserInfo _playerID;
-				private _clientStateNumber = _userInfo select 6;
+				private _clientStateNumber = 0;
+				if (!isNil "_userInfo" && {count _userInfo >= 7}) then {
+					_clientStateNumber = _userInfo select 6;
+				};
 				if (_clientStateNumber < 6) exitWith {
 					[format ["(EventHandler) PlayerConnected: %1 (UID) is no longer connected to the mission, exiting CBA PFH", _playerID], "DEBUG"] call attendanceTracker_fnc_log;
 					_args call attendanceTracker_fnc_writeConnect;
