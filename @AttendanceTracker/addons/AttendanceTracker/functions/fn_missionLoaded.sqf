@@ -1,1 +1,0 @@
-!(getClientStateNumber <= 5 || getClientStateNumber isEqualTo 11);

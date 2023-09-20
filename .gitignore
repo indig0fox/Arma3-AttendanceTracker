@@ -8,3 +8,10 @@ config.json
 /extension/@AttendanceTracker/
 
 \@AttendanceTracker.7z
+*.pbo
+.hemttout
+hemtt
+hemtt.exe
+*.biprivatekey
+
+*.bk

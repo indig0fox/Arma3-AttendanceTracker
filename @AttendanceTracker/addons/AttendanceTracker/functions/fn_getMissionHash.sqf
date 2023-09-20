@@ -1,1 +1,0 @@
-(parseSimpleArray ("AttendanceTracker" callExtension "getMissionHash")) select 0;

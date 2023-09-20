@@ -1,6 +1,0 @@
-﻿$ENV:GOARCH = "amd64"
-$ENV:CGO_ENABLED = 1
-
-go1.16.4 build -o ../@AttendanceTracker/AttendanceTracker_x64.dll -buildmode=c-shared .
-
-go1.16.4 build -o buildDb.exe .
