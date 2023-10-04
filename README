@@ -226,6 +226,8 @@ docker run --rm -it -v ${PWD}:/app -e GOOS=linux -e GOARCH=386 -e CGO_ENABLED=1 
 
 ### Compile Addon
 
+First, move the compiled dlls from extension/AttendanceTracker/dist to the project root.
+
 To prepare the addon, you'll need to download the [HEMTT](https://brettmayson.github.io/HEMTT/commands/build.html) binary, place it in the project root, and run the following command:
 
 ```bash

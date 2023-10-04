@@ -92,6 +92,8 @@ func init() {
 			logger.Log.Info().Msgf(result)
 		}
 
+		logger.RotateLogs()
+
 		logger.ArmaOnly.Info().Msgf(`%s v%s started`, EXTENSION_NAME, "0.0.0")
 		logger.ArmaOnly.Info().Msgf(`Log path: %s`, logger.ActiveOptions.Path)
 
@@ -107,6 +109,14 @@ func init() {
 			logger.Log.Error().Err(err).Msgf(`Error connecting to database`)
 			return
 		}
+
+		logger.Log.Info().
+			Str("dialect", db.Client().Dialector.Name()).
+			Str("database", db.Client().Migrator().CurrentDatabase()).
+			Str("host", util.ConfigJSON.GetString("sqlConfig.mysqlHost")).
+			Int("port", util.ConfigJSON.GetInt("sqlConfig.mysqlPort")).
+			Msgf(`Connected to database`)
+
 		err = db.Client().Set("gorm:table_options", "ENGINE=InnoDB").AutoMigrate(
 			&World{},
 			&Mission{},
@@ -119,7 +129,6 @@ func init() {
 		startA3CallHandlers()
 
 		initSuccess = true
-		logger.RotateLogs()
 		a3interface.WriteArmaCallback(
 			EXTENSION_NAME,
 			":READY:",

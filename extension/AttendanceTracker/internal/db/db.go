@@ -3,7 +3,6 @@ package db
 import (
 	"fmt"
 
-	"github.com/indig0fox/a3go/a3interface"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -54,9 +53,6 @@ func Connect() error {
 	if err != nil {
 		return err
 	}
-
-	a3interface.WriteArmaCallback("connectDB", `["Database connected", "INFO"]`)
-	a3interface.WriteArmaCallback("connectDB", `["SUCCESS", "INFO"]`)
 
 	return nil
 }

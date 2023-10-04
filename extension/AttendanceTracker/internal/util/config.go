@@ -26,9 +26,9 @@ func LoadConfig(modulePathDir string) (string, error) {
 		"mysqlDatabase": "a3attendance",
 	})
 	ConfigJSON.SetDefault("armaConfig", map[string]interface{}{
-		"debug":             true,
-		"traceLogToFile":    false,
-		"dbUpdateIntervalS": 60,
+		"debug":            true,
+		"traceLogToFile":   false,
+		"dbUpdateInterval": "90s",
 	})
 
 	wd, err := os.Getwd()

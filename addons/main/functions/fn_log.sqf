@@ -1,3 +1,5 @@
+#include "..\script_mod.hpp"
+
 params [
 	["_message", "", [""]],
 	["_level", "INFO", [""]],
