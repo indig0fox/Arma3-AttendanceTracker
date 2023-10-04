@@ -1,5 +1,11 @@
-
 *.log
 *.bak
-
-\@AttendanceTracker/config.json
+*.pbo
+*.dll
+*.so
+*.pbo
+.hemttout
+hemtt
+hemtt.exe
+*.biprivatekey
+*.bk
