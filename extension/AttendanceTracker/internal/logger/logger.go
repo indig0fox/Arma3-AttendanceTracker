@@ -51,8 +51,8 @@ func InitLoggers(o *LoggerOptionsType) {
 	// create a new lumberjack file logger (adds log rotation and compression)
 	ll = &lumberjack.Logger{
 		Filename:   ActiveOptions.Path,
-		MaxSize:    1,
-		MaxBackups: 5,
+		MaxSize:    5,
+		MaxBackups: 10,
 		MaxAge:     14,
 		Compress:   true,
 		LocalTime:  true,
@@ -118,7 +118,7 @@ func InitLoggers(o *LoggerOptionsType) {
 			FormatTimestamp: armaLogFormatTimestamp,
 			FormatLevel:     armaLogFormatLevel,
 		},
-	)).With().Timestamp().Caller().Logger()
+	)).With().Timestamp().Logger()
 
 	if ActiveOptions.Debug {
 		Log = Log.Level(zerolog.DebugLevel)
