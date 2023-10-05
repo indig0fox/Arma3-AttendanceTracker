@@ -199,17 +199,23 @@ Once it's built, copy the file from ./dist to the project root, then build the a
 
 #### COMPILING FOR WINDOWS
 
-```bash
+```ps1
 docker pull x1unix/go-mingw:1.20
 
+# version is semantic + build date + git hash
+# e.g. 1.0.0-2021-05-30-1a2b3c4d
+$versionSem = '0.2.0'
+$dateStr = Get-Date -Format 'yyyyMMdd'
+$version = "$versionSem-$dateStr-$(git rev-parse --short HEAD)"
+
 # Compile x64 Windows DLL
-docker run --rm -it -v ${PWD}:/go/work -w /go/work x1unix/go-mingw:1.20 go build -o dist/AttendanceTracker_x64.dll -buildmode=c-shared -ldflags '-w -s' ./cmd
+docker run --rm -it -v ${PWD}:/go/work -w /go/work x1unix/go-mingw:1.20 go build -o dist/AttendanceTracker_x64.dll -buildmode=c-shared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./cmd
 
 # Compile x86 Windows DLL
-docker run --rm -it -v ${PWD}:/go/work -w /go/work -e GOARCH=386 x1unix/go-mingw:1.20 go build -o dist/AttendanceTracker.dll -buildmode=c-shared -ldflags '-w -s' ./cmd
+docker run --rm -it -v ${PWD}:/go/work -w /go/work -e GOARCH=386 x1unix/go-mingw:1.20 go build -o dist/AttendanceTracker.dll -buildmode=c-shared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./cmd
 
 # Compile x64 Windows EXE
-docker run --rm -it -v ${PWD}:/go/work -w /go/work x1unix/go-mingw:1.20 go build -o dist/AttendanceTracker_x64.exe -ldflags '-w -s' ./cmd
+docker run --rm -it -v ${PWD}:/go/work -w /go/work x1unix/go-mingw:1.20 go build -o dist/AttendanceTracker_x64.exe -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./cmd
 ```
 
 #### COMPILING FOR LINUX
@@ -218,10 +224,10 @@ docker run --rm -it -v ${PWD}:/go/work -w /go/work x1unix/go-mingw:1.20 go build
 docker build -t indifox926/build-a3go:linux-so -f ./build/Dockerfile.build ./cmd
 
 # Compile x64 Linux .so
-docker run --rm -it -v ${PWD}:/app -e GOOS=linux -e GOARCH=amd64 -e CGO_ENABLED=1 -e CC=gcc indifox926/build-a3go:linux-so go build -o dist/AttendanceTracker_x64.so -linkshared -ldflags '-w -s' ./cmd
+docker run --rm -it -v ${PWD}:/app -e GOOS=linux -e GOARCH=amd64 -e CGO_ENABLED=1 -e CC=gcc indifox926/build-a3go:linux-so go build -o dist/AttendanceTracker_x64.so -linkshared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./cmd
 
 # Compile x86 Linux .so
-docker run --rm -it -v ${PWD}:/app -e GOOS=linux -e GOARCH=386 -e CGO_ENABLED=1 -e CC=gcc indifox926/build-a3go:linux-so go build -o dist/AttendanceTracker.so -linkshared -ldflags '-w -s' ./cmd
+docker run --rm -it -v ${PWD}:/app -e GOOS=linux -e GOARCH=386 -e CGO_ENABLED=1 -e CC=gcc indifox926/build-a3go:linux-so go build -o dist/AttendanceTracker.so -linkshared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./cmd
 ```
 
 ### Compile Addon

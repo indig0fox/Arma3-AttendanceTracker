@@ -26,7 +26,7 @@ import (
 
 const EXTENSION_NAME string = "AttendanceTracker"
 const ADDON_NAME string = "AttendanceTracker"
-const EXTENSION_VERSION string = "0.9.0.1"
+const EXTENSION_VERSION string = "dev"
 
 // file paths
 const ATTENDANCE_TABLE string = "attendance"
