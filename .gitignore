@@ -9,3 +9,5 @@ hemtt
 hemtt.exe
 *.biprivatekey
 *.bk
+
+releases/

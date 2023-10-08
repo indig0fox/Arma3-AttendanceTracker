@@ -57,8 +57,35 @@ var (
 func init() {
 
 	a3interface.SetVersion(EXTENSION_VERSION)
-	a3interface.RegisterRvExtensionChannels(RVExtensionChannels)
-	a3interface.RegisterRvExtensionArgsChannels(RVExtensionArgsChannels)
+	a3interface.NewRegistration(":START:").
+		SetDefaultResponse(`["Extension beginning init process"]`).
+		SetFunction(onStartCommand).
+		SetRunInBackground(true).
+		Register()
+
+	a3interface.NewRegistration(":MISSION:HASH:").
+		SetDefaultResponse(`["Retrieving mission hash"]`).
+		SetFunction(onMissionHashCommand).
+		SetRunInBackground(true).
+		Register()
+
+	a3interface.NewRegistration(":GET:SETTINGS:").
+		SetDefaultResponse(`["Retrieving settings"]`).
+		SetFunction(onGetSettingsCommand).
+		SetRunInBackground(true).
+		Register()
+
+	a3interface.NewRegistration(":LOG:MISSION:").
+		SetDefaultResponse(`["Logging mission data"]`).
+		SetArgsFunction(onLogMissionArgsCommand).
+		SetRunInBackground(true).
+		Register()
+
+	a3interface.NewRegistration(":LOG:PRESENCE:").
+		SetDefaultResponse(`["Logging presence data"]`).
+		SetArgsFunction(onLogPresenceArgsCommand).
+		SetRunInBackground(true).
+		Register()
 
 	go func() {
 		var err error
@@ -126,8 +153,6 @@ func init() {
 			logger.Log.Error().Err(err).Msgf(`Error migrating database schema`)
 		}
 
-		startA3CallHandlers()
-
 		initSuccess = true
 		a3interface.WriteArmaCallback(
 			EXTENSION_NAME,
@@ -138,56 +163,82 @@ func init() {
 	}()
 }
 
-func startA3CallHandlers() error {
-	go func() {
-		for {
-			select {
-			case <-RVExtensionChannels[":START:"]:
-				logger.Log.Trace().Msgf(`RVExtension :START: requested`)
-				if !initSuccess {
-					logger.Log.Warn().Msgf(`Received another :START: command before init was complete, ignoring.`)
-					continue
-				} else {
-					logger.RotateLogs()
-					a3interface.WriteArmaCallback(
-						EXTENSION_NAME,
-						":READY:",
-					)
-				}
-			case <-RVExtensionChannels[":MISSION:HASH:"]:
-				logger.Log.Trace().Msgf(`RVExtension :MISSION:HASH: requested`)
-				timestamp, hash := getMissionHash()
-				a3interface.WriteArmaCallback(
-					EXTENSION_NAME,
-					":MISSION:HASH:",
-					timestamp,
-					hash,
-				)
-			case <-RVExtensionChannels[":GET:SETTINGS:"]:
-				logger.Log.Trace().Msg(`Settings requested`)
-				armaConfig, err := util.ConfigArmaFormat()
-				if err != nil {
-					logger.Log.Error().Err(err).Msg(`Error when marshaling arma config`)
-					continue
-				}
-				logger.Log.Trace().Str("armaConfig", armaConfig).Send()
-				a3interface.WriteArmaCallback(
-					EXTENSION_NAME,
-					":GET:SETTINGS:",
-					armaConfig,
-				)
-			case v := <-RVExtensionArgsChannels[":LOG:MISSION:"]:
-				go func(data []string) {
-					writeWorldInfo(v[1])
-					writeMission(v[0])
-				}(v)
-			case v := <-RVExtensionArgsChannels[":LOG:PRESENCE:"]:
-				go writeAttendance(v[0])
-			}
-		}
-	}()
+func onStartCommand(
+	ctx a3interface.ArmaExtensionContext,
+	data string,
+) (string, error) {
+	logger.Log.Trace().Msgf(`RVExtension :START: requested`)
+	if !initSuccess {
+		logger.Log.Warn().Msgf(`Received another :START: command before init was complete, ignoring.`)
+		return "Initing!", nil
+	} else {
+		logger.RotateLogs()
+		a3interface.WriteArmaCallback(
+			EXTENSION_NAME,
+			":READY:",
+		)
+		return "Ready!", nil
+	}
+}
 
-	return nil
+func onMissionHashCommand(
+	ctx a3interface.ArmaExtensionContext,
+	data string,
+) (string, error) {
+	logger.Log.Trace().Msgf(`RVExtension :MISSION:HASH: requested`)
+	timestamp, hash := getMissionHash()
+	a3interface.WriteArmaCallback(
+		EXTENSION_NAME,
+		":MISSION:HASH:",
+		timestamp,
+		hash,
+	)
+	return fmt.Sprintf(
+		`[%q, %q]`,
+		timestamp,
+		hash,
+	), nil
+}
+
+func onGetSettingsCommand(
+	ctx a3interface.ArmaExtensionContext,
+	data string,
+) (string, error) {
+	logger.Log.Trace().Msg(`Settings requested`)
+	armaConfig, err := util.ConfigArmaFormat()
+	if err != nil {
+		logger.Log.Error().Err(err).Msg(`Error when marshaling arma config`)
+		return "", err
+	}
+	logger.Log.Trace().Str("armaConfig", armaConfig).Send()
+	a3interface.WriteArmaCallback(
+		EXTENSION_NAME,
+		":GET:SETTINGS:",
+		armaConfig,
+	)
+	return armaConfig, nil
+}
+
+func onLogMissionArgsCommand(
+	ctx a3interface.ArmaExtensionContext,
+	command string,
+	args []string,
+) (string, error) {
+	go func(data []string) {
+		writeWorldInfo(data[1])
+		writeMission(data[0])
+	}(args)
+
+	return `["Logging mission data"]`, nil
+}
+
+func onLogPresenceArgsCommand(
+	ctx a3interface.ArmaExtensionContext,
+	command string,
+	args []string,
+) (string, error) {
+	go writeAttendance(args[0])
+	return `["Logging presence data"]`, nil
 }
 
 // getMissionHash will return the current time in UTC and an md5 hash of that time
