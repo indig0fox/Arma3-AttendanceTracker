@@ -313,8 +313,8 @@ func writeAttendance(data string) {
 	var dbEvent Session
 	db.Client().
 		Where(
-			"player_uid = ? AND mission_hash = ?",
-			event.PlayerUID,
+			"player_id = ? AND mission_hash = ?",
+			event.PlayerId,
 			event.MissionHash,
 		).
 		Order("join_time_utc desc").
