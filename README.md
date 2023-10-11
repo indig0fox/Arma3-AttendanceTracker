@@ -159,39 +159,50 @@ Once it's built, copy the file from ./dist to the project root, then build the a
 
 #### COMPILING FOR WINDOWS
 
+These compile commands should be run from the project root.
+
 ```ps1
 docker pull x1unix/go-mingw:1.20
 
 # version is semantic + build date + git hash
 # e.g. 1.0.0-2021-05-30-1a2b3c4d
-$versionSem = '1.1.0'
+$versionSem = '1.0.1'
 $dateStr = Get-Date -Format 'yyyyMMdd'
 $version = "$versionSem-$dateStr-$(git rev-parse --short HEAD)"
 
 # Compile x64 Windows DLL
-docker run --rm -it -v ${PWD}:/go/work -w /go/work -e GOARCH=amd64 -e CGO_ENABLED=1 x1unix/go-mingw:1.20 go build -o ./dist/AttendanceTracker_x64.dll -buildmode=c-shared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./extension/AttendanceTracker/cmd
+docker run --rm -it -v ${PWD}\extension\AttendanceTracker:/go/work -w /go/work -e GOARCH=amd64 -e CGO_ENABLED=1 x1unix/go-mingw:1.20 go build -o ./dist/AttendanceTracker_x64.dll -buildmode=c-shared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./cmd
+
+Move-Item -Path ./extension/AttendanceTracker/dist/AttendanceTracker_x64.dll -Destination ./AttendanceTracker_x64.dll -Force
 
 # Compile x86 Windows DLL
-docker run --rm -it -v ${PWD}:/go/work -w /go/work -e GOARCH=386 -e CGO_ENABLED=1 x1unix/go-mingw:1.20 go build -o ./dist/AttendanceTracker.dll -buildmode=c-shared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./extension/AttendanceTracker/cmd
+docker run --rm -it -v ${PWD}\extension\AttendanceTracker:/go/work -w /go/work -e GOARCH=386 -e CGO_ENABLED=1 x1unix/go-mingw:1.20 go build -o ./dist/AttendanceTracker.dll -buildmode=c-shared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./cmd
+
+Move-Item -Path ./extension/AttendanceTracker/dist/AttendanceTracker.dll -Destination ./AttendanceTracker.dll -Force
+
 # Compile x64 Windows EXE
 docker run --rm -it -v ${PWD}:/go/work -w /go/work -e GOARCH=amd64 -e CGO_ENABLED=1 x1unix/go-mingw:1.20 go build -o ./dist/AttendanceTracker_x64.exe -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./extension/AttendanceTracker/cmd
 ```
 
 #### COMPILING FOR LINUX
 
-```bash
+```ps1
 docker build -t indifox926/build-a3go:linux-so -f ./build/Dockerfile.build .
 
 # Compile x64 Linux .so
-docker run --rm -it -v ${PWD}:/app -e GOOS=linux -e GOARCH=amd64 -e CGO_ENABLED=1 indifox926/build-a3go:linux-so go build -o ./dist/AttendanceTracker_x64.so -linkshared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./extension/AttendanceTracker/cmd
+docker run --rm -it -v ${PWD}\extension\AttendanceTracker:/app -e GOOS=linux -e GOARCH=amd64 -e CGO_ENABLED=1 indifox926/build-a3go:linux-so go build -o ./dist/AttendanceTracker_x64.so -linkshared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./cmd
+
+Move-Item -Path ./extension/AttendanceTracker/dist/AttendanceTracker_x64.so -Destination ./AttendanceTracker_x64.so -Force
 
 # Compile x86 Linux .so
-docker run --rm -it -v ${PWD}:/app -e GOOS=linux -e GOARCH=386 -e CGO_ENABLED=1 indifox926/build-a3go:linux-so go build -o ./dist/AttendanceTracker.so -linkshared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./extension/AttendanceTracker/cmd
+docker run --rm -it -v ${PWD}\extension\AttendanceTracker:/app -e GOOS=linux -e GOARCH=386 -e CGO_ENABLED=1 indifox926/build-a3go:linux-so go build -o ./dist/AttendanceTracker.so -linkshared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./cmd
+
+Move-Item -Path ./extension/AttendanceTracker/dist/AttendanceTracker.so -Destination ./AttendanceTracker.so -Force
 ```
 
 ### Compile Addon
 
-First, move the compiled dlls from extension/AttendanceTracker/dist to the project root.
+First, move the compiled dlls from `extension/AttendanceTracker/dist` to the project root.
 
 To prepare the addon, you'll need to download the [HEMTT](https://brettmayson.github.io/HEMTT/commands/build.html) binary, place it in the project root, and run the following command:
 
