@@ -1,7 +1,5 @@
 # Arma 3 Attendance Tracker
 
----
-
 ## Setup
 
 ### Set Up a Database Engine
@@ -37,7 +35,7 @@ CREATE DATABASE `arma3_attendance`;
 
 1. Download the latest release from the [releases page](https://github.com/indig0fox/Arma3-AttendanceTracker/releases).
 1. Extract the .zip and move `@AttendanceTracker` to your Arma 3 server's root directory.
-1. Inside of `@AttendanceTracker` you will find a `config.json` file. Open this file and configure it to your circumstances. See the [Configuration](#configuration) section for more information.
+1. Inside of `@AttendanceTracker` you will find an `AttendanceTracker.config.example.json` file. Copy this as `AttendanceTRacker.config.json`. Open this new file and configure it to your circumstances. See the [Configuration](#configuration) section for more information.
 1. Add the mod to your server's startup parameters. For example: `-serverMod="@AttendanceTracker;"`
 
 At next run, the Arma 3 server will launch with the mod running.
@@ -55,10 +53,9 @@ The following table describes the configuration options.
 | sqlConfig.mySqlUser | string | The username to use when connecting to your MySQL instance. | root |
 | sqlConfig.mySqlPassword | string | The password to use when connecting to your MySQL instance. | root |
 | sqlConfig.mySqlDatabase | string | The name of the database to use. | arma3_attendance |
-| armaConfig.dbUpdateIntervalSeconds | integer | The number of seconds between disconnect_time updates per user. | 90 |
-| armaConfig.serverEventFillNullMinutes | integer | The max session duration to fill in for missing server disconnect_time values. | 90 |
-| armaConfig.missionEventFillNullMinutes | integer | The max session duration to fill in for missing mission disconnect_time values. | 15 |
+| armaConfig.dbUpdateInterval | string, [`time.Duration` Go type](https://pkg.go.dev/time#ParseDuration) | The number of seconds between disconnect_time updates per user. | "90s" |
 | armaConfig.debug | boolean | Whether or not to enable debug logging. | false |
+| armaConfig.traceLogToFile | boolean | Whether or not to enable trace logging to the addon folder's log file. | false |
 
 ## Usage
 
@@ -97,23 +94,16 @@ FROM mysql.time_zone_name
 
 ### Performance
 
-The extension will update the disconnect_time field for each player every `dbUpdateIntervalSeconds` seconds. This is to ensure that the disconnect_time field is updated in the event that the server crashes or the mission ends without a disconnect event.
+The extension will update the disconnect_time field for each player every `dbUpdateInterval` seconds. This is to ensure that the disconnect_time field is updated in the event that the server crashes or the mission ends without a disconnect event.
 
 These calls are threaded in the Go runtime and will not block the Arma 3 server while processing. The default value of 90 seconds should be sufficient for most servers. Each period begins when a player connects to the server or connects to a mission, which provides a natural offset.
 
-### NULL disconnect_time Values
-
-In the event that the server crashes or a disconnect event for a mission is not sent, the next join for each will update past rows based on the following:
-
-If the join time for a row is within [`{event_type}EventFillNullMinutes`](#configuration) minutes of the previous disconnect time, the previous disconnect time will be updated to the new join time. Otherwise, it will be set as [`{event_type}EventFillNullMinutes`](#configuration) from the join time for that row.
-
-This is an attempt to account for missing events for individual players while not attributing large gap periods to their calculated session times. If the server crashes, the extension will update all rows with a NULL disconnect_time to the current time. See [Server Crash Time Filling](#server-crash-time-filling) for more information.
-
 #### Server Crash Time Filling
 
-The addon will update `@AttendanceTracker/lastServerTime.txt` with Arma 3's `diag_tickTime` every 30 seconds. This is to ensure that the server time is always available to the extension, even if the server crashes. This file is not used for any other purpose.
+In the event that the server crashes and a user has not been in the mission longer than `dbUpdateInterval` and therefore has a NULL `disconnect_time_utc` value, upon next launch the extension will update the row procedure:
 
-On each time update, the extension will check this file and compare the received value to it. If the lastServerTime < lastServerTime.txt, the extension will assume that the server has restarted and will update all event rows with a NULL disconnect_time to the current time OR the threshold specified in the configuration file, whichever produces the smaller session duration.
+- If more than `dbUpdateInterval` has passed since the row's `join_time_utc` value, the row will be updated with a `disconnect_time_utc` value of `join_time_utc + dbUpdateInterval`.
+- If less than `dbUpdateInterval` has passed since the row's `join_time_utc` value, the row will be updated with a `disconnect_time_utc` value of the current time.
 
 ---
 
@@ -123,7 +113,7 @@ On each time update, the extension will check this file and compare the received
 | --- | --- |
 | worlds | Stores world information. |
 | missions | Stores mission information. |
-| attendance_items | Stores rows that indicate player information and join/disconnect times. |
+| Session | Stores rows that indicate player information and join/disconnect times. |
 
 ### Worlds
 
@@ -133,9 +123,9 @@ The worlds table will store basic info about the world. This is used to link mis
 
 The missions table will store basic info about the mission. This is used to link attendance items to missions.
 
-### Attendance Items
+### Sessions
 
-The attendance_items table will store rows that indicate player information and join/disconnect times. This can be used to calculate play time per player per mission. Each row is also linked to a mission, so that these records can be grouped.
+The sessions table will store rows that indicate player information and join/disconnect times. This can be used to calculate play time per player per mission. Each row is also linked to a mission, so that these records can be grouped.
 
 ---
 
@@ -143,37 +133,9 @@ The attendance_items table will store rows that indicate player information and 
 
 ### Show missions with attendance
 
-This will retrieve a view showing all missions with attendance data, sorted by the most recent mission joins first. Mission events without a mission disconnect_time (due to server crash or in-progress mission) will be ignored.
-
 See [Timezone](#timezone) for more information on converting times to your local timezone.
 
-```sql
-select
-    a.server_profile as Server,
-    a.briefing_name as "Mission Name",
-    CONVERT_TZ(a.mission_start, 'UTC', 'US/Eastern') as "Start Time",
-    b.display_name as "World",
-    c.profile_name as "Player Name",
-    c.player_uid as "Player UID",
-    TIMESTAMPDIFF(
-        MINUTE,
-        c.join_time,
-        c.disconnect_time
-    ) as "Play Time (m)",
-    CONVERT_TZ(c.join_time, 'UTC', 'US/Eastern') as "Join Time",
-    CONVERT_TZ(c.disconnect_time, 'UTC', 'US/Eastern') as "Leave Time"
-from missions a
-    LEFT JOIN worlds b ON a.world_id = b.id
-    LEFT JOIN attendance_items c ON a.mission_hash = c.mission_hash
-where
-    c.event_type = 'Mission'
-    AND c.disconnect_time IS NOT NULL
-    AND TIMESTAMPDIFF(
-        MINUTE,
-        c.join_time,
-        c.disconnect_time
-    ) > 0
-```
+TODO
 
 ---
 
@@ -187,9 +149,7 @@ Pull requests are welcome. For major changes, please open an issue first to disc
 
 ### Prerequisites
 
-- [Go 1.16.4](https://golang.org/doc/install)
-- [MinGW-w64](https://sourceforge.net/projects/mingw-w64/) (Windows only)
-- [GCC](https://gcc.gnu.org/) (Linux only)
+- Docker
 
 ### Building Extension using Docker
 
@@ -209,13 +169,12 @@ $dateStr = Get-Date -Format 'yyyyMMdd'
 $version = "$versionSem-$dateStr-$(git rev-parse --short HEAD)"
 
 # Compile x64 Windows DLL
-docker run --rm -it -v ${PWD}:/go/work -w /go/work -e GOARCH=amd64 -e CGO_ENABLED=1 x1unix/go-mingw:1.20 go build -o dist/AttendanceTracker_x64.dll -buildmode=c-shared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./cmd
+docker run --rm -it -v ${PWD}:/go/work -w /go/work -e GOARCH=amd64 -e CGO_ENABLED=1 x1unix/go-mingw:1.20 go build -o ./dist/AttendanceTracker_x64.dll -buildmode=c-shared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./extension/AttendanceTracker/cmd
 
 # Compile x86 Windows DLL
-docker run --rm -it -v ${PWD}:/go/work -w /go/work -e GOARCH=386 -e CGO_ENABLED=1 x1unix/go-mingw:1.20 go build -o dist/AttendanceTracker.dll -buildmode=c-shared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./cmd
-
+docker run --rm -it -v ${PWD}:/go/work -w /go/work -e GOARCH=386 -e CGO_ENABLED=1 x1unix/go-mingw:1.20 go build -o ./dist/AttendanceTracker.dll -buildmode=c-shared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./extension/AttendanceTracker/cmd
 # Compile x64 Windows EXE
-docker run --rm -it -v ${PWD}:/go/work -w /go/work -e GOARCH=amd64 -e CGO_ENABLED=1 x1unix/go-mingw:1.20 go build -o dist/AttendanceTracker_x64.exe -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./cmd
+docker run --rm -it -v ${PWD}:/go/work -w /go/work -e GOARCH=amd64 -e CGO_ENABLED=1 x1unix/go-mingw:1.20 go build -o ./dist/AttendanceTracker_x64.exe -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./extension/AttendanceTracker/cmd
 ```
 
 #### COMPILING FOR LINUX
@@ -224,10 +183,10 @@ docker run --rm -it -v ${PWD}:/go/work -w /go/work -e GOARCH=amd64 -e CGO_ENABLE
 docker build -t indifox926/build-a3go:linux-so -f ./build/Dockerfile.build .
 
 # Compile x64 Linux .so
-docker run --rm -it -v ${PWD}:/app -e GOOS=linux -e GOARCH=amd64 -e CGO_ENABLED=1 -e CC=gcc indifox926/build-a3go:linux-so go build -o dist/AttendanceTracker_x64.so -linkshared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./cmd
+docker run --rm -it -v ${PWD}:/app -e GOOS=linux -e GOARCH=amd64 -e CGO_ENABLED=1 indifox926/build-a3go:linux-so go build -o ./dist/AttendanceTracker_x64.so -linkshared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./extension/AttendanceTracker/cmd
 
 # Compile x86 Linux .so
-docker run --rm -it -v ${PWD}:/app -e GOOS=linux -e GOARCH=386 -e CGO_ENABLED=1 -e CC=gcc indifox926/build-a3go:linux-so go build -o dist/AttendanceTracker.so -linkshared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./cmd
+docker run --rm -it -v ${PWD}:/app -e GOOS=linux -e GOARCH=386 -e CGO_ENABLED=1 indifox926/build-a3go:linux-so go build -o ./dist/AttendanceTracker.so -linkshared -ldflags "-w -s -X main.EXTENSION_VERSION=$version" ./extension/AttendanceTracker/cmd
 ```
 
 ### Compile Addon

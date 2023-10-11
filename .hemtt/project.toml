@@ -1,15 +1,15 @@
-name = "IFX Attendance Tracker"
-author = "IndigoFox"
-prefix = "attendancetracker"
-mainprefix = "x"
+name      ="IFX Attendance Tracker"
+author    ="IndigoFox"
+prefix    ="attendancetracker"
+mainprefix="x"
 
 [version]
-path = "addons/main/script_version.hpp" # Default
-git_hash = 6                            # Default: 8
+path    ="addons/main/script_version.hpp" # Default
+git_hash=6                                # Default: 8
 
 [files]
-include = [
-  "AttendanceTracker.config.json",
+include=[
+  "AttendanceTracker.config.example.json",
   "LICENSE",
   "README",
   "mod.cpp",
@@ -19,20 +19,20 @@ include = [
 
 # Launched with `hemtt launch`
 [hemtt.launch.default]
-workshop = [
+workshop=[
   "450814997", # CBA_A3's Workshop ID
 ]
-dlc = []
-optionals = []
-parameters = [
+dlc=[]
+optionals=[]
+parameters=[
   "-skipIntro",        # These parameters are passed to the Arma 3 executable
   "-noSplash",         # They do not need to be added to your list
   "-showScriptErrors", # You can add additional parameters here
   "-debug",
   "-filePatching",
 ]
-executable = "arma3_x64" # Default: "arma3_x64"
+executable="arma3_x64" # Default: "arma3_x64"
 
 [hemtt.release]
-sign = false   # Default: true
-archive = true # Default: true
+sign   =false # Default: true
+archive=true  # Default: true
