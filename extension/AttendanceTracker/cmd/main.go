@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -22,35 +21,25 @@ import (
 	"github.com/indig0fox/Arma3-AttendanceTracker/internal/util"
 	"github.com/indig0fox/a3go/a3interface"
 	"github.com/indig0fox/a3go/assemblyfinder"
+	"github.com/rs/zerolog"
 )
 
 const EXTENSION_NAME string = "AttendanceTracker"
 const ADDON_NAME string = "AttendanceTracker"
-const EXTENSION_VERSION string = "dev"
 
 // file paths
 const ATTENDANCE_TABLE string = "attendance"
 const MISSIONS_TABLE string = "missions"
 const WORLDS_TABLE string = "worlds"
 
-var currentMissionID uint = 0
-
-var RVExtensionChannels = map[string]chan string{
-	":START:":        make(chan string),
-	":MISSION:HASH:": make(chan string),
-	":GET:SETTINGS:": make(chan string),
-}
-
-var RVExtensionArgsChannels = map[string]chan []string{
-	":LOG:MISSION:":  make(chan []string),
-	":LOG:PRESENCE:": make(chan []string),
-}
-
 var (
+	EXTENSION_VERSION string = "DEVELOPMENT"
+
 	modulePath    string
 	modulePathDir string
 
-	initSuccess bool // default false
+	loadedMission *Mission
+	loadedWorld   *World
 )
 
 // configure log output
@@ -58,31 +47,28 @@ func init() {
 
 	a3interface.SetVersion(EXTENSION_VERSION)
 	a3interface.NewRegistration(":START:").
-		SetDefaultResponse(`["Extension beginning init process"]`).
 		SetFunction(onStartCommand).
-		SetRunInBackground(true).
+		SetRunInBackground(false).
 		Register()
 
 	a3interface.NewRegistration(":MISSION:HASH:").
-		SetDefaultResponse(`["Retrieving mission hash"]`).
 		SetFunction(onMissionHashCommand).
-		SetRunInBackground(true).
+		SetRunInBackground(false).
 		Register()
 
 	a3interface.NewRegistration(":GET:SETTINGS:").
-		SetDefaultResponse(`["Retrieving settings"]`).
 		SetFunction(onGetSettingsCommand).
-		SetRunInBackground(true).
+		SetRunInBackground(false).
 		Register()
 
 	a3interface.NewRegistration(":LOG:MISSION:").
-		SetDefaultResponse(`["Logging mission data"]`).
+		SetDefaultResponse(`Logging mission data`).
 		SetArgsFunction(onLogMissionArgsCommand).
 		SetRunInBackground(true).
 		Register()
 
 	a3interface.NewRegistration(":LOG:PRESENCE:").
-		SetDefaultResponse(`["Logging presence data"]`).
+		SetDefaultResponse(`Logging presence data`).
 		SetArgsFunction(onLogPresenceArgsCommand).
 		SetRunInBackground(true).
 		Register()
@@ -91,12 +77,7 @@ func init() {
 		var err error
 
 		modulePath = assemblyfinder.GetModulePath()
-		// get absolute path of module path
-		modulePathAbs, err := filepath.Abs(modulePath)
-		if err != nil {
-			panic(err)
-		}
-		modulePathDir = filepath.Dir(modulePathAbs)
+		modulePathDir = filepath.Dir(modulePath)
 
 		result, configErr := util.LoadConfig(modulePathDir)
 		logger.InitLoggers(&logger.LoggerOptionsType{
@@ -107,11 +88,13 @@ func init() {
 					EXTENSION_NAME,
 					EXTENSION_VERSION,
 				)),
-			AddonName:     ADDON_NAME,
-			ExtensionName: EXTENSION_NAME,
-			Debug:         util.ConfigJSON.GetBool("armaConfig.debug"),
-			Trace:         util.ConfigJSON.GetBool("armaConfig.traceLogToFile"),
+			AddonName:        ADDON_NAME,
+			ExtensionName:    EXTENSION_NAME,
+			ExtensionVersion: EXTENSION_VERSION,
+			Debug:            util.ConfigJSON.GetBool("armaConfig.debug"),
+			Trace:            util.ConfigJSON.GetBool("armaConfig.trace"),
 		})
+		logger.RotateLogs()
 		if configErr != nil {
 			logger.Log.Error().Err(configErr).Msgf(`Error loading config`)
 			return
@@ -119,9 +102,7 @@ func init() {
 			logger.Log.Info().Msgf(result)
 		}
 
-		logger.RotateLogs()
-
-		logger.ArmaOnly.Info().Msgf(`%s v%s started`, EXTENSION_NAME, "0.0.0")
+		logger.Log.Info().Msgf(`%s v%s started`, EXTENSION_NAME, EXTENSION_VERSION)
 		logger.ArmaOnly.Info().Msgf(`Log path: %s`, logger.ActiveOptions.Path)
 
 		db.SetConfig(db.ConfigStruct{
@@ -151,9 +132,10 @@ func init() {
 		)
 		if err != nil {
 			logger.Log.Error().Err(err).Msgf(`Error migrating database schema`)
+		} else {
+			logger.Log.Info().Msgf(`Database schema migrated`)
 		}
 
-		initSuccess = true
 		a3interface.WriteArmaCallback(
 			EXTENSION_NAME,
 			":READY:",
@@ -167,32 +149,22 @@ func onStartCommand(
 	ctx a3interface.ArmaExtensionContext,
 	data string,
 ) (string, error) {
-	logger.Log.Trace().Msgf(`RVExtension :START: requested`)
-	if !initSuccess {
-		logger.Log.Warn().Msgf(`Received another :START: command before init was complete, ignoring.`)
-		return "Initing!", nil
-	} else {
-		logger.RotateLogs()
-		a3interface.WriteArmaCallback(
-			EXTENSION_NAME,
-			":READY:",
-		)
-		return "Ready!", nil
-	}
+	logger.Log.Debug().Msgf(`RVExtension :START: requested`)
+	loadedWorld = nil
+	loadedMission = nil
+	return fmt.Sprintf(
+		`["%s v%s started"]`,
+		EXTENSION_NAME,
+		EXTENSION_VERSION,
+	), nil
 }
 
 func onMissionHashCommand(
 	ctx a3interface.ArmaExtensionContext,
 	data string,
 ) (string, error) {
-	logger.Log.Trace().Msgf(`RVExtension :MISSION:HASH: requested`)
+	logger.Log.Debug().Msgf(`RVExtension :MISSION:HASH: requested`)
 	timestamp, hash := getMissionHash()
-	a3interface.WriteArmaCallback(
-		EXTENSION_NAME,
-		":MISSION:HASH:",
-		timestamp,
-		hash,
-	)
 	return fmt.Sprintf(
 		`[%q, %q]`,
 		timestamp,
@@ -204,19 +176,14 @@ func onGetSettingsCommand(
 	ctx a3interface.ArmaExtensionContext,
 	data string,
 ) (string, error) {
-	logger.Log.Trace().Msg(`Settings requested`)
-	armaConfig, err := util.ConfigArmaFormat()
-	if err != nil {
-		logger.Log.Error().Err(err).Msg(`Error when marshaling arma config`)
-		return "", err
-	}
-	logger.Log.Trace().Str("armaConfig", armaConfig).Send()
-	a3interface.WriteArmaCallback(
-		EXTENSION_NAME,
-		":GET:SETTINGS:",
+	logger.Log.Debug().Msg(`RVExtension :GET:SETTINGS: requested`)
+	// get arma config
+	c := util.ConfigJSON.Get("armaConfig")
+	armaConfig := a3interface.ToArmaHashMap(c)
+	return fmt.Sprintf(
+		`[%s]`,
 		armaConfig,
-	)
-	return armaConfig, nil
+	), nil
 }
 
 func onLogMissionArgsCommand(
@@ -224,12 +191,27 @@ func onLogMissionArgsCommand(
 	command string,
 	args []string,
 ) (string, error) {
-	go func(data []string) {
-		writeWorldInfo(data[1])
-		writeMission(data[0])
-	}(args)
+	thisLogger := logger.Log.With().Str("command", command).Interface("ctx", ctx).Logger()
+	thisLogger.Debug().Msgf(`RVExtension :LOG:MISSION: requested`)
+	var err error
+	world, err := writeWorldInfo(args[0], thisLogger)
+	if err != nil {
+		return ``, err
+	}
+	loadedWorld = &world
 
-	return `["Logging mission data"]`, nil
+	mission, err := writeMission(args[1], thisLogger)
+	if err != nil {
+		return ``, err
+	}
+	loadedMission = &mission
+
+	a3interface.WriteArmaCallback(
+		EXTENSION_NAME,
+		":LOG:MISSION:SUCCESS:",
+	)
+
+	return ``, nil
 }
 
 func onLogPresenceArgsCommand(
@@ -237,8 +219,10 @@ func onLogPresenceArgsCommand(
 	command string,
 	args []string,
 ) (string, error) {
-	go writeAttendance(args[0])
-	return `["Logging presence data"]`, nil
+	thisLogger := logger.Log.With().Str("command", command).Interface("ctx", ctx).Logger()
+	thisLogger.Debug().Msgf(`RVExtension :LOG:PRESENCE: requested`)
+	writeAttendance(args[0], thisLogger)
+	return ``, nil
 }
 
 // getMissionHash will return the current time in UTC and an md5 hash of that time
@@ -248,7 +232,7 @@ func getMissionHash() (sqlTime, hashString string) {
 
 	nowTime := time.Now().UTC()
 	// mysql format
-	sqlTime = nowTime.Format("2006-01-02 15:04:05")
+	sqlTime = nowTime.Format(time.RFC3339)
 	hash := md5.Sum([]byte(sqlTime))
 	hashString = fmt.Sprintf(`%x`, hash)
 
@@ -291,86 +275,162 @@ func finalizeUnendedSessions() {
 	logger.Log.Info().Msgf(`Filled disconnect time of %d events.`, len(events))
 }
 
-func writeWorldInfo(worldInfo string) {
-	// worldInfo is json, parse it
-	var wi World
-	fixedString := unescapeArmaQuotes(worldInfo)
-	err := json.Unmarshal([]byte(fixedString), &wi)
+func writeWorldInfo(worldInfo string, thisLogger zerolog.Logger) (World, error) {
+
+	parsedInterface, err := a3interface.ParseSQF(worldInfo)
 	if err != nil {
-		logger.Log.Error().Err(err).Msgf(`Error when unmarshalling world info`)
-		return
+		thisLogger.Error().Err(err).Msgf(`Error when parsing world info`)
+		return World{}, err
+	}
+
+	parsedMap, err := a3interface.ParseSQFHashMap(parsedInterface)
+	if err != nil {
+		thisLogger.Error().Err(err).Msgf(`Error when parsing world info`)
+		return World{}, err
+	}
+
+	thisLogger.Trace().Msgf(`parsedMap: %+v`, parsedMap)
+
+	// create world object from map[string]interface{}
+	var wi = World{}
+	worldBytes, err := json.Marshal(parsedMap)
+	if err != nil {
+		thisLogger.Error().Err(err).Msgf(`Error when marshalling world info`)
+		return World{}, err
+	}
+	err = json.Unmarshal(worldBytes, &wi)
+	if err != nil {
+		thisLogger.Error().Err(err).Msgf(`Error when unmarshalling world info`)
+		return World{}, err
+	}
+
+	thisLogger.Trace().Msgf(`World info: %+v`, wi)
+
+	var dbWorld World
+	db.Client().Where("world_name = ?", wi.WorldName).First(&dbWorld)
+	// if world exists, use it
+	if dbWorld.ID > 0 {
+		thisLogger.Debug().Msgf(`World %s exists with ID %d.`, wi.WorldName, dbWorld.ID)
+		return dbWorld, nil
 	}
 
 	// write world if not exist
-	var dbWorld World
-	db.Client().Where("world_name = ?", wi.WorldName).First(&dbWorld)
-	if dbWorld.ID == 0 {
-		db.Client().Create(&wi)
-		if db.Client().Error != nil {
-			logger.Log.Error().Err(db.Client().Error).Msgf(`Error when creating world`)
-			return
-		}
-		logger.Log.Info().Msgf(`World %s created.`, wi.WorldName)
-	} else {
-		// don't do anything if exists
-		logger.Log.Debug().Msgf(`World %s exists with ID %d.`, wi.WorldName, dbWorld.ID)
+	db.Client().Create(&wi)
+	if db.Client().Error != nil {
+		thisLogger.Error().Err(db.Client().Error).Msgf(`Error when creating world`)
+		return World{}, db.Client().Error
 	}
+	thisLogger.Info().Msgf(`World %s created.`, wi.WorldName)
+
+	return wi, nil
 }
 
-func writeMission(missionJSON string) {
+func writeMission(data string, thisLogger zerolog.Logger) (Mission, error) {
 	var err error
-	// writeLog(functionName, fmt.Sprintf(`["%s", "DEBUG"]`, Mission))
-	// Mission is json, parse it
-	var mi Mission
-	fixedString := fixEscapeQuotes(trimQuotes(missionJSON))
-	err = json.Unmarshal([]byte(fixedString), &mi)
+	parsedInterface, err := a3interface.ParseSQF(data)
 	if err != nil {
-		logger.Log.Error().Err(err).Msgf(`Error when unmarshalling mission`)
-		return
+		thisLogger.Error().Err(err).Msgf(`Error when parsing mission info`)
+		return Mission{}, err
 	}
 
-	// get world from WorldName
-	var dbWorld World
-	db.Client().Where("world_name = ?", mi.WorldName).First(&dbWorld)
-	if dbWorld.ID == 0 {
-		logger.Log.Error().Msgf(`World %s not found.`, mi.WorldName)
-		return
+	parsedMap, err := a3interface.ParseSQFHashMap(parsedInterface)
+	if err != nil {
+		thisLogger.Error().Err(err).Msgf(`Error when parsing mission info`)
+		return Mission{}, err
 	}
 
-	mi.WorldID = dbWorld.ID
+	thisLogger.Trace().Msgf(`parsedMap: %+v`, parsedMap)
+
+	var mi Mission
+	// create mission object from map[string]interface{}
+	missionBytes, err := json.Marshal(parsedMap)
+	if err != nil {
+		thisLogger.Error().Err(err).Msgf(`Error when marshalling mission info`)
+		return Mission{}, err
+	}
+	err = json.Unmarshal(missionBytes, &mi)
+	if err != nil {
+		thisLogger.Error().Err(err).Msgf(`Error when unmarshalling mission info`)
+		return Mission{}, err
+	}
+
+	if loadedWorld == nil {
+		thisLogger.Error().Msgf(`Current world ID not set, cannot create mission`)
+		return Mission{}, err
+	}
+	if loadedWorld.ID == 0 {
+		thisLogger.Error().Msgf(`Current world ID is 0, cannot create mission`)
+		return Mission{}, err
+	}
+	mi.WorldID = loadedWorld.ID
 
 	// write mission to database
 	db.Client().Create(&mi)
 	if db.Client().Error != nil {
-		logger.Log.Error().Err(db.Client().Error).Msgf(`Error when creating mission`)
-		return
+		thisLogger.Error().Err(db.Client().Error).Msgf(`Error when creating mission`)
+		return Mission{}, db.Client().Error
 	}
-	logger.Log.Info().Msgf(`Mission %s created with ID %d`, mi.MissionName, mi.ID)
-	currentMissionID = mi.ID
+	thisLogger.Info().Msgf(`Mission %s created with ID %d`, mi.MissionName, mi.ID)
+
+	a3interface.WriteArmaCallback(
+		EXTENSION_NAME,
+		":LOG:MISSION:SUCCESS:",
+		"World and mission logged successfully.",
+	)
+
+	return mi, nil
 }
 
-func writeAttendance(data string) {
+func writeAttendance(data string, thisLogger zerolog.Logger) {
 	var err error
-	// data is json, parse it
-	stringjson := unescapeArmaQuotes(data)
-	var event Session
-	err = json.Unmarshal([]byte(stringjson), &event)
+
+	parsedInterface, err := a3interface.ParseSQF(data)
 	if err != nil {
-		logger.Log.Error().Err(err).Msgf(`Error when unmarshalling attendance`)
+		thisLogger.Error().Err(err).Str("data", data).Msgf(`Error when parsing attendance info`)
 		return
 	}
+
+	parsedMap, err := a3interface.ParseSQFHashMap(parsedInterface)
+	if err != nil {
+		thisLogger.Error().Err(err).Str("data", data).Msgf(`Error when parsing attendance info`)
+		return
+	}
+
+	thisLogger.Trace().Msgf(`parsedMap: %+v`, parsedMap)
+
+	var thisSession Session
+	// create session object from map[string]interface{}
+	sessionBytes, err := json.Marshal(parsedMap)
+	if err != nil {
+		thisLogger.Error().Err(err).Str("data", data).Msgf(`Error when marshalling attendance info`)
+		return
+	}
+
+	err = json.Unmarshal(sessionBytes, &thisSession)
+	if err != nil {
+		thisLogger.Error().Err(err).Str("data", data).Msgf(`Error when unmarshalling attendance info`)
+		return
+	}
+
+	thisLogger2 := thisLogger.With().
+		Str("playerId", thisSession.PlayerId).
+		Str("playerUID", thisSession.PlayerUID).
+		Str("profileName", thisSession.ProfileName).
+		Logger()
 
 	// search existing event
 	var dbEvent Session
+
 	db.Client().
 		Where(
 			"player_id = ? AND mission_hash = ?",
-			event.PlayerId,
-			event.MissionHash,
+			thisSession.PlayerId,
+			thisSession.MissionHash,
 		).
 		Order("join_time_utc desc").
 		First(&dbEvent)
-	if dbEvent.ID != 0 {
+
+	if dbEvent.ID > 0 {
 		// update disconnect time
 		dbEvent.DisconnectTimeUTC = sql.NullTime{
 			Time:  time.Now(),
@@ -378,34 +438,32 @@ func writeAttendance(data string) {
 		}
 		err = db.Client().Save(&dbEvent).Error
 		if err != nil {
-			logger.Log.Error().Err(err).
+			thisLogger2.Error().Err(err).
 				Msgf(`Error when updating disconnect time for event %d`, dbEvent.ID)
 			return
 		}
-		logger.Log.Debug().Msgf(`Attendance updated for %s (%s)`,
-			dbEvent.ProfileName,
-			dbEvent.PlayerUID,
+		thisLogger2.Debug().Msgf(`Attendance updated with ID %d`,
+			dbEvent.ID,
 		)
 	} else {
 		// insert new row
-		event.JoinTimeUTC = sql.NullTime{
+		thisSession.JoinTimeUTC = sql.NullTime{
 			Time:  time.Now(),
 			Valid: true,
 		}
 
-		if currentMissionID == 0 {
-			logger.Log.Error().Msgf(`Current mission ID not set, cannot create attendance event`)
+		if loadedMission == nil {
+			thisLogger2.Error().Msgf(`Current mission ID not set, cannot create attendance event`)
 			return
 		}
-		event.MissionID = currentMissionID
-		err = db.Client().Create(&event).Error
+		thisSession.MissionID = loadedMission.ID
+		err = db.Client().Create(&thisSession).Error
 		if err != nil {
-			logger.Log.Error().Err(err).Msgf(`Error when creating attendance event`)
+			thisLogger2.Error().Err(err).Msgf(`Error when creating attendance event`)
 			return
 		}
-		logger.Log.Debug().Msgf(`Attendance created for %s (%s)`,
-			event.ProfileName,
-			event.PlayerUID,
+		thisLogger2.Info().Msgf(`Attendance created with ID %d`,
+			thisSession.ID,
 		)
 	}
 }
@@ -414,20 +472,6 @@ func getTimestamp() string {
 	// get the current unix timestamp in nanoseconds
 	// return time.Now().Local().Unix()
 	return time.Now().Format("2006-01-02 15:04:05")
-}
-
-func trimQuotes(s string) string {
-	// trim the start and end quotes from a string
-	return strings.Trim(s, `"`)
-}
-
-func fixEscapeQuotes(s string) string {
-	// fix the escape quotes in a string
-	return strings.Replace(s, `""`, `"`, -1)
-}
-
-func unescapeArmaQuotes(s string) string {
-	return fixEscapeQuotes(trimQuotes(s))
 }
 
 func main() {

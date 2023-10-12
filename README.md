@@ -166,7 +166,7 @@ docker pull x1unix/go-mingw:1.20
 
 # version is semantic + build date + git hash
 # e.g. 1.0.0-2021-05-30-1a2b3c4d
-$versionSem = '1.0.1'
+$versionSem = '1.1.1'
 $dateStr = Get-Date -Format 'yyyyMMdd'
 $version = "$versionSem-$dateStr-$(git rev-parse --short HEAD)"
 

@@ -1,0 +1,15 @@
+version: '3.1'
+
+services:
+
+  db:
+    image: mariadb
+    restart: always
+    environment:
+      - "MARIADB_ROOT_PASSWORD=example"
+      - "MARIADB_DATABASE=a3attendance"
+    volumes:
+      - ./db:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    

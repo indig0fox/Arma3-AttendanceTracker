@@ -3,12 +3,12 @@
     "mysqlHost": "localhost",
     "mysqlPort": 3306,
     "mysqlUser": "root",
-    "mysqlPassword": "password",
+    "mysqlPassword": "example",
     "mysqlDatabase": "a3attendance"
   },
   "armaConfig": {
     "dbUpdateInterval": "90s",
     "debug": false,
-    "traceLogToFile": false
+    "trace": false
   }
 }

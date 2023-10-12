@@ -1,7 +1,7 @@
-#include "script_mod.hpp"
+#include "script_component.hpp"
 
 class CfgPatches {
-	class AttendanceTracker {
+	class ADDON {
 		units[] = {};
 		weapons[] = {};
 		requiredVersion = 2.10;
@@ -17,20 +17,17 @@ class CfgPatches {
 };
 
 class CfgFunctions {
-	class attendanceTracker {
+	class ADDON {
 		class functions {
-			file = "x\addons\attendancetracker\main\functions";
-			class postInit {postInit = 1;};
-			class callbackHandler {postInit = 1;};
-			class getMissionHash {};
-			class getMissionInfo {};
-			class getSettings {};
-			class getWorldInfo {};
-			class log {};
-			class missionLoaded {};
-			class onPlayerConnected {};
-			class timestamp {};
-			class writePlayer {};
+			class postInit {
+				file = QPATHTOF(DOUBLES(fnc,postInit).sqf);
+				postInit = 1;
+			};
+			PATHTO_FNC(getMissionInfo);
+			PATHTO_FNC(getWorldInfo);
+			PATHTO_FNC(log);
+			PATHTO_FNC(missionLoaded);
+			PATHTO_FNC(onPlayerConnected);
 		};
 	};
 };
