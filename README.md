@@ -113,7 +113,7 @@ In the event that the server crashes and a user has not been in the mission long
 | --- | --- |
 | worlds | Stores world information. |
 | missions | Stores mission information. |
-| Session | Stores rows that indicate player information and join/disconnect times. |
+| sessions | Stores rows that indicate player information and join/disconnect times. |
 
 ### Worlds
 
