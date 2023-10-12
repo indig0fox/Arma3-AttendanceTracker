@@ -11,3 +11,5 @@ hemtt.exe
 *.bk
 
 releases/
+mariadb/db/
+AttendanceTracker.config.json

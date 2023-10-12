@@ -113,7 +113,7 @@ In the event that the server crashes and a user has not been in the mission long
 | --- | --- |
 | worlds | Stores world information. |
 | missions | Stores mission information. |
-| Session | Stores rows that indicate player information and join/disconnect times. |
+| sessions | Stores rows that indicate player information and join/disconnect times. |
 
 ### Worlds
 
@@ -166,7 +166,7 @@ docker pull x1unix/go-mingw:1.20
 
 # version is semantic + build date + git hash
 # e.g. 1.0.0-2021-05-30-1a2b3c4d
-$versionSem = '1.0.1'
+$versionSem = '1.1.1'
 $dateStr = Get-Date -Format 'yyyyMMdd'
 $version = "$versionSem-$dateStr-$(git rev-parse --short HEAD)"
 

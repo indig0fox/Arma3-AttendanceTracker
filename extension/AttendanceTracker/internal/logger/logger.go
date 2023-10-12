@@ -52,9 +52,9 @@ func InitLoggers(o *LoggerOptionsType) {
 	ll = &lumberjack.Logger{
 		Filename:   ActiveOptions.Path,
 		MaxSize:    5,
-		MaxBackups: 10,
+		MaxBackups: 8,
 		MaxAge:     14,
-		Compress:   true,
+		Compress:   false,
 		LocalTime:  true,
 	}
 
@@ -66,7 +66,7 @@ func InitLoggers(o *LoggerOptionsType) {
 	armaLogFormatLevel := func(i interface{}) string {
 		return strings.ToUpper(
 			fmt.Sprintf(
-				"(%s)",
+				"%s:",
 				i,
 			))
 	}
@@ -117,13 +117,17 @@ func InitLoggers(o *LoggerOptionsType) {
 			NoColor:         true,
 			FormatTimestamp: armaLogFormatTimestamp,
 			FormatLevel:     armaLogFormatLevel,
+			FieldsExclude:   []string{zerolog.CallerFieldName, "ctx"},
 		},
-	)).With().Timestamp().Logger()
+	)).With().Timestamp().Caller().Logger()
 
 	if ActiveOptions.Debug {
 		Log = Log.Level(zerolog.DebugLevel)
 	} else {
 		Log = Log.Level(zerolog.InfoLevel)
+	}
+	if ActiveOptions.Trace {
+		Log = Log.Level(zerolog.TraceLevel)
 	}
 
 }

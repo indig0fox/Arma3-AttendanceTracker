@@ -10,6 +10,7 @@ git_hash=6                                # Default: 8
 [files]
 include=[
   "AttendanceTracker.config.example.json",
+  # "AttendanceTracker.config.json", # used for copying active config during debugging
   "LICENSE",
   "README",
   "mod.cpp",

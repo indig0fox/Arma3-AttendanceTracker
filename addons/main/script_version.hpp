@@ -1,7 +1,7 @@
 #define MAJOR 1
 #define MINOR 1
 #define PATCH 0
-#define BUILD 20231003
+#define BUILD 20231012
 
 #define VERSION 1.1
 #define VERSION_STR MAJOR##.##MINOR##.##PATCH##.##BUILD
